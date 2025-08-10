@@ -35,6 +35,9 @@
 <img src="screenshot/mobile.jpg" width="360"/>
 
 ## 📋 更新日志（Changelog）
+### 📦 糯米播放器 1.3.1
+- 修复打不开网易云音乐
+
 ### 📦 糯米播放器 1.3.0
 - 支持网易云音乐投射播放
 
@@ -55,9 +58,7 @@
 
 你可以直接下载安装本项目构建的 APK 文件：
 
-- 📦 [点击下载：糯米播放器 1.3.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.3.0.apk) 增加网易云音乐适配
-- 📦 [点击下载：糯米播放器 1.2.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.2.0.apk) 增加播放模式和默认开启歌词模式选项
-- 📦 [点击下载：糯米播放器 1.1.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.1.0.apk) 增加了实时歌词
+- 📦 [点击下载：糯米播放器 1.3.1.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.3.1.apk) 增加网易云音乐适配
 - 📦 [点击下载：糯米播放器 1.0.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器%201.0.0.apk) 稳定版本
 
 
