@@ -1,6 +1,6 @@
-# 糯米播放器 - QQ音乐 Android Auto 支持
+# 糯米播放器 - 音乐App Android Auto 支持
 
-🚗🎶 一款支持 Android Auto 的 QQ 音乐播放扩展工具，旨在提供更优雅的车载音乐体验。  
+🚗🎶 一款支持 Android Auto 的音乐App播放扩展工具，旨在提供更优雅的车载音乐体验。  
 
 我是在买车后才发现，自己平常使用的 QQ 音乐并不支持 Android Auto，而像 Apple Music 等支持 Android Auto 的 App 又缺少我最常听的歌曲。为了解决这个困扰，我尝试了市面上的各种解决方案，但都不尽如人意。  
 
@@ -10,13 +10,13 @@
 
 ## 📄 免责声明
 
-本项目仅供个人学习与研究使用，**不包含任何音乐资源**，也不提供音乐服务接口。涉及 QQ 音乐 的数据仅来源于系统媒体广播，不侵犯版权。  
+本项目仅供个人学习与研究使用，**不包含任何音乐资源**，也不提供音乐服务接口。涉及音乐的数据仅来源于系统媒体广播，不侵犯版权。  
 如项目中引用到的第三方代码存在授权问题，请联系我，我会立即删除或修改
 
 ## ✨ 项目特色
 
 - 🚘 支持 Android Auto 播放界面展示
-- 🎵 接入 QQ 音乐媒体数据（基于系统媒体广播）
+- 🎵 接入音乐App媒体数据（基于系统媒体广播）
 - ⏩ 支持播放进度条及拖动控制
 - ⏯️ 支持播放 / 暂停 / 上一首 / 下一首 控制
 - 🖼️ 显示歌曲标题、艺术家、专辑图等媒体信息
@@ -35,6 +35,8 @@
 <img src="screenshot/mobile.jpg" width="360"/>
 
 ## 📋 更新日志（Changelog）
+### 📦 糯米播放器 1.3.0
+- 支持网易云音乐投射播放
 
 ### 📦 糯米播放器 1.2.0
 - 新增播放模式切换功能（顺序播放 / 单曲循环 / 随机播放）  
@@ -53,9 +55,11 @@
 
 你可以直接下载安装本项目构建的 APK 文件：
 
-- 📦 [点击下载：糯米播放器 1.0.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器%201.0.0.apk) 稳定版本
-- 📦 [点击下载：糯米播放器 1.1.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.1.0.apk) 增加了实时歌词
+- 📦 [点击下载：糯米播放器 1.3.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.3.0.apk) 增加网易云音乐适配
 - 📦 [点击下载：糯米播放器 1.2.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.2.0.apk) 增加播放模式和默认开启歌词模式选项
+- 📦 [点击下载：糯米播放器 1.1.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.1.0.apk) 增加了实时歌词
+- 📦 [点击下载：糯米播放器 1.0.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器%201.0.0.apk) 稳定版本
+
 
 > 请确保已开启 Android Auto 的开发者模式并允许安装未知来源应用，具体步骤见下方运行指南。
 
