@@ -40,9 +40,12 @@
 
 ## 📋 更新日志（Changelog）
 
+### 📦 糯米播放器 1.4.1
+- 移除部分权限需求
+
 ### 📦 糯米播放器 1.4.0
 - 从特定平台适配升级为通用方案，现已支持**绝大部分播放类 App**（音乐/播客/视频等，基于系统 MediaSession/通知）。
-- 修复多个潜在问题，处理若干边界场景，减少异常与闪退概率。
+- 修复多个潜在问题，处理若干边界场景，减少异常与闪退概率
 
 ### 📦 糯米播放器 1.3.1
 - 修复无法跳转网易云音乐
@@ -66,6 +69,7 @@
 ## 📥 APK 下载
 
 你可以直接下载安装本项目构建的 APK 文件：
+- 📦 [点击下载：糯米播放器 1.4.1.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.4.1.apk) 移除了部分权限需求，国产手机安装不了1.4.0版本的推荐下载这个
 - 📦 [点击下载：糯米播放器 1.4.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.4.0.apk) 从特定平台适配升级为通用方案，现已支持**绝大部分播放类 App**，推荐下载这个
 - 📦 [点击下载：糯米播放器 1.3.1.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.3.1.apk) 增加网易云音乐适配
 - 📦 [点击下载：糯米播放器 1.2.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.2.0.apk) 增加播放模式和默认开启歌词模式选项
