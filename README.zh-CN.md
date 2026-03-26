@@ -45,7 +45,6 @@
 
 - `mobile`：手机端界面与通知监听服务
 - `shared`：本地镜像 `MediaBrowserServiceCompat` 和歌词逻辑
-- `automotive`：Android Auto 壳模块
 
 运行链路如下：
 
@@ -72,7 +71,8 @@
 产物路径：
 
 - `mobile/build/outputs/apk/debug/mobile-debug.apk`
-- `automotive/build/outputs/apk/debug/automotive-debug.apk`
+
+实际只需要安装 `mobile-debug.apk`。Android Auto 所需的 service 和 metadata 已经合并进这个 APK。
 
 ## 安装与测试
 

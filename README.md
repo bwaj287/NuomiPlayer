@@ -44,7 +44,6 @@ The project has three modules:
 
 - `mobile`: phone app UI and notification listener
 - `shared`: mirrored `MediaBrowserServiceCompat` and lyric overlay logic
-- `automotive`: Android Auto app shell
 
 Runtime flow:
 
@@ -71,7 +70,8 @@ Build commands:
 APK outputs:
 
 - `mobile/build/outputs/apk/debug/mobile-debug.apk`
-- `automotive/build/outputs/apk/debug/automotive-debug.apk`
+
+Only `mobile-debug.apk` needs to be installed. The Android Auto service and metadata are already merged into that APK.
 
 ## Install And Test
 
