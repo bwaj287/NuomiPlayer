@@ -17,6 +17,7 @@ import android.service.notification.StatusBarNotification;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.util.Log;
 
+import androidx.core.content.ContextCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.example.myapplication.shared.LyricsHeuristics;
@@ -24,6 +25,7 @@ import com.example.myapplication.shared.MediaSyncContracts;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 @SuppressLint("OverrideAbstract")
 public class QqSessionSniffer extends NotificationListenerService {
@@ -34,6 +36,7 @@ public class QqSessionSniffer extends NotificationListenerService {
     private String activePackage;
     private String lastLyricsPayload = "";
     private String lastStatus = "";
+    private boolean kugouReceiverRegistered;
 
     private final MediaController.Callback controllerCallback = new MediaController.Callback() {
         @Override
@@ -76,16 +79,31 @@ public class QqSessionSniffer extends NotificationListenerService {
         }
     };
 
+    private final BroadcastReceiver kugouBroadcastReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null) {
+                return;
+            }
+            String action = intent.getAction();
+            inspectTextCandidate("action", action, "broadcast-action");
+            inspectBundle("broadcast", intent.getExtras(), "broadcast:" + action);
+            refreshCtrl();
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
         IntentFilter filter = new IntentFilter(MediaSyncContracts.ACTION_REQUEST_REMOTE_CONTROLLER);
         LocalBroadcastManager.getInstance(this).registerReceiver(requestReceiver, filter);
+        registerKugouBroadcasts();
     }
 
     @Override
     public void onDestroy() {
         LocalBroadcastManager.getInstance(this).unregisterReceiver(requestReceiver);
+        unregisterKugouBroadcasts();
         if (activeController != null) {
             activeController.unregisterCallback(controllerCallback);
         }
@@ -152,6 +170,7 @@ public class QqSessionSniffer extends NotificationListenerService {
             return;
         }
 
+        scanControllers(controllers);
         MediaController chosen = chooseController(controllers);
         if (chosen == null) {
             chosen = controllers.get(0);
@@ -170,34 +189,20 @@ public class QqSessionSniffer extends NotificationListenerService {
 
     private MediaController chooseController(List<MediaController> controllers) {
         String preferred = preferredPackage();
-        MediaController preferredPlaying = null;
-        MediaController preferredAny = null;
-        MediaController anyPlaying = null;
+        MediaController best = null;
+        int bestScore = Integer.MIN_VALUE;
 
         for (MediaController controller : controllers) {
             if (controller == null) {
                 continue;
             }
-            if (preferred.equals(controller.getPackageName())) {
-                preferredAny = controller;
-                if (isPlaying(controller.getPlaybackState())) {
-                    preferredPlaying = controller;
-                }
-            } else if (anyPlaying == null && isPlaying(controller.getPlaybackState())) {
-                anyPlaying = controller;
+            int score = scoreController(controller, preferred);
+            if (score > bestScore) {
+                bestScore = score;
+                best = controller;
             }
         }
-
-        if (preferredPlaying != null) {
-            return preferredPlaying;
-        }
-        if (preferredAny != null) {
-            return preferredAny;
-        }
-        if (anyPlaying != null) {
-            return anyPlaying;
-        }
-        return controllers.isEmpty() ? null : controllers.get(0);
+        return best;
     }
 
     private boolean isPlaying(PlaybackState state) {
@@ -218,6 +223,17 @@ public class QqSessionSniffer extends NotificationListenerService {
         inspectControllerExtras(controller, "controller-extras");
         inspectPlaybackState(controller.getPlaybackState(), "playback-state");
         sendToken();
+    }
+
+    private void scanControllers(List<MediaController> controllers) {
+        for (MediaController controller : controllers) {
+            if (controller == null || controller.getPackageName() == null) {
+                continue;
+            }
+            inspectMetadata(controller.getMetadata(), "scan-metadata:" + controller.getPackageName());
+            inspectBundle("controller", controller.getExtras(), "scan-extras:" + controller.getPackageName());
+            inspectPlaybackState(controller.getPlaybackState(), "scan-playback:" + controller.getPackageName());
+        }
     }
 
     private void sendToken() {
@@ -345,6 +361,23 @@ public class QqSessionSniffer extends NotificationListenerService {
             }
             return;
         }
+        if (value instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) value;
+            int index = 0;
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                inspectValue(
+                        key + "." + String.valueOf(entry.getKey()),
+                        entry.getValue(),
+                        source,
+                        depth + 1
+                );
+                index++;
+                if (index >= 8) {
+                    break;
+                }
+            }
+            return;
+        }
         if (value instanceof byte[]) {
             byte[] bytes = (byte[]) value;
             if (bytes.length == 0 || bytes.length > 32_768) {
@@ -444,6 +477,199 @@ public class QqSessionSniffer extends NotificationListenerService {
             default:
                 return String.valueOf(state.getState());
         }
+    }
+
+    private void registerKugouBroadcasts() {
+        if (kugouReceiverRegistered) {
+            return;
+        }
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("com.kugou.android.huawei.hicar");
+        filter.addAction("com.kugou.android.music.metachanged");
+        filter.addAction("com.kugou.android.music.playstatechanged");
+        filter.addAction("com.kugou.android.music.queuechanged");
+        filter.addAction("com.kugou.android.music.musicservicecommand.action_back_lyric_change");
+        filter.addAction("com.kugou.android.music.musicservicecommand.action_back_lyric_reset");
+        filter.addAction("com.kugou.android.music.musicservicecommand.auto_change_lyr");
+        filter.addAction("com.kugou.android.update_remote_lyric_close");
+        filter.addAction("com.kugou.android.action.hicar.state_change");
+        filter.addAction("com.huawei.hicar.ACTION_HICAR_STARTED");
+        filter.addAction("com.huawei.hicar.ACTION_HICAR_STOPPED");
+        ContextCompat.registerReceiver(
+                this,
+                kugouBroadcastReceiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+        );
+        kugouReceiverRegistered = true;
+    }
+
+    private void unregisterKugouBroadcasts() {
+        if (!kugouReceiverRegistered) {
+            return;
+        }
+        unregisterReceiver(kugouBroadcastReceiver);
+        kugouReceiverRegistered = false;
+    }
+
+    private int scoreController(MediaController controller, String preferredPackage) {
+        int score = 0;
+        String packageName = controller.getPackageName();
+        if (preferredPackage.equals(packageName)) {
+            score += 4000;
+        } else if (MediaSyncContracts.FALLBACK_TARGET_PACKAGE.equals(packageName)) {
+            score += 2500;
+        }
+        if (isPlaying(controller.getPlaybackState())) {
+            score += 200;
+        }
+        score += scoreMetadata(controller.getMetadata());
+        score += scoreBundle(controller.getExtras(), 0);
+        score += scorePlaybackState(controller.getPlaybackState());
+        return score;
+    }
+
+    private int scoreMetadata(MediaMetadata metadata) {
+        if (metadata == null) {
+            return 0;
+        }
+        int score = 0;
+        for (String key : metadata.keySet()) {
+            score += scoreKey(key);
+            CharSequence text = metadata.getText(key);
+            if (text != null) {
+                score += scoreText(key, text.toString());
+            }
+        }
+        return score;
+    }
+
+    private int scorePlaybackState(PlaybackState state) {
+        if (state == null) {
+            return 0;
+        }
+        int score = scoreBundle(state.getExtras(), 0);
+        List<PlaybackState.CustomAction> actions = state.getCustomActions();
+        if (actions == null) {
+            return score;
+        }
+        for (PlaybackState.CustomAction action : actions) {
+            if (action == null) {
+                continue;
+            }
+            score += scoreText("action", action.getAction());
+            if (action.getName() != null) {
+                score += scoreText("name", action.getName().toString());
+            }
+            score += scoreBundle(action.getExtras(), 0);
+        }
+        return score;
+    }
+
+    private int scoreBundle(Bundle extras, int depth) {
+        if (extras == null || extras.isEmpty() || depth > 3) {
+            return 0;
+        }
+        int score = 0;
+        for (String key : extras.keySet()) {
+            score += scoreKey(key);
+            score += scoreObject(key, extras.get(key), depth + 1);
+        }
+        return score;
+    }
+
+    private int scoreObject(String key, Object value, int depth) {
+        if (value == null || depth > 3) {
+            return 0;
+        }
+        if (value instanceof CharSequence) {
+            return scoreText(key, value.toString());
+        }
+        if (value instanceof Bundle) {
+            return scoreBundle((Bundle) value, depth + 1);
+        }
+        if (value instanceof String[]) {
+            int score = 0;
+            for (String candidate : (String[]) value) {
+                score += scoreText(key, candidate);
+            }
+            return score;
+        }
+        if (value instanceof CharSequence[]) {
+            int score = 0;
+            for (CharSequence candidate : (CharSequence[]) value) {
+                score += scoreText(key, candidate != null ? candidate.toString() : null);
+            }
+            return score;
+        }
+        if (value instanceof List<?>) {
+            int score = 0;
+            int index = 0;
+            for (Object candidate : (List<?>) value) {
+                score += scoreObject(key + "[" + index + "]", candidate, depth + 1);
+                index++;
+                if (index >= 8) {
+                    break;
+                }
+            }
+            return score;
+        }
+        if (value instanceof Map<?, ?>) {
+            int score = 0;
+            int index = 0;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                score += scoreObject(
+                        key + "." + String.valueOf(entry.getKey()),
+                        entry.getValue(),
+                        depth + 1
+                );
+                index++;
+                if (index >= 8) {
+                    break;
+                }
+            }
+            return score;
+        }
+        if (value instanceof byte[]) {
+            byte[] bytes = (byte[]) value;
+            if (bytes.length == 0 || bytes.length > 32_768) {
+                return 0;
+            }
+            return scoreText(key, new String(bytes, StandardCharsets.UTF_8));
+        }
+        return 0;
+    }
+
+    private int scoreKey(String key) {
+        if (key == null) {
+            return 0;
+        }
+        String normalized = key.toLowerCase();
+        int score = 0;
+        if (normalized.contains("hicar") || normalized.contains("ucar")) {
+            score += 1200;
+        }
+        if (LyricsHeuristics.keyLooksLikeLyrics(key)) {
+            score += 2400;
+        }
+        return score;
+    }
+
+    private int scoreText(String key, String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        int score = scoreKey(key);
+        String normalized = text.toLowerCase();
+        if (normalized.contains("hicar") || normalized.contains("ucar")) {
+            score += 1000;
+        }
+        if (LyricsHeuristics.looksLikeTimedLyrics(text)) {
+            score += 3200;
+        } else if (LyricsHeuristics.looksLikeLyricsPayload(text)) {
+            score += 1800;
+        }
+        return score;
     }
 
     private void dumpCapabilities(MediaController controller) {
