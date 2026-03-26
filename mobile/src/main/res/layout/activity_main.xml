@@ -15,7 +15,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:text="检测不到正在播放的音乐\n请先打开 QQ 音乐并播放任意歌曲"
+        android:text="检测不到正在播放的音乐\n请先打开酷狗音乐并播放任意歌曲"
         android:textColor="@android:color/black"
         android:textSize="18sp"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -68,10 +68,10 @@
         app:layout_constraintEnd_toEndOf="parent">
 
         <Button
-            android:id="@+id/btn_open_qqmusic"
+            android:id="@+id/btn_open_player"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="打开 QQ 音乐" />
+            android:text="打开酷狗音乐" />
 
 
 

@@ -1,0 +1,31 @@
+[versions]
+agp = "8.2.2"
+kotlin = "1.9.22"
+appcompat = "1.7.0"
+material = "1.12.0"
+activity = "1.9.3"
+constraintlayout = "2.2.0"
+core-ktx = "1.13.1"
+junit = "4.13.2"
+ext-junit = "1.2.1"
+espresso = "3.6.1"
+media = "1.7.0"
+remotecallback = "1.0.0-alpha02"
+
+[libraries]
+activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
+espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
+ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "ext-junit" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+media = { group = "androidx.media", name = "media", version.ref = "media" }
+remotecallback = { group = "androidx.remotecallback", name = "remotecallback", version.ref = "remotecallback" }
+remotecallback-processor = { group = "androidx.remotecallback", name = "remotecallback-processor", version.ref = "remotecallback" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

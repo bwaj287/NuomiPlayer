@@ -33,7 +33,7 @@
             android:singleLine="true"
             android:textAppearance="?textAppearanceHeadline5"
             android:textColor="?android:attr/textColorPrimary"
-            android:text="请先打开 QQ 音乐并播放任意歌曲"
+            android:text="请先打开酷狗音乐并播放任意歌曲"
             />
 
         <com.google.android.material.textview.MaterialTextView
@@ -53,7 +53,7 @@
             android:textAppearance="?textAppearanceSubtitle2"
             android:textColor="?android:attr/textColorSecondary"
             app:layout_constrainedWidth="true"
-            tools:text="@tools:sample/full_names" />
+            tools:text="等待读取播放器元数据" />
 
     </LinearLayout>
 
@@ -110,7 +110,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/playPauseButton"
         app:layout_constraintBottom_toBottomOf="parent"
-        tools:text="@tools:sample/full_names" />
+        tools:text="来源：酷狗音乐&#10;等待捕获 MediaSession / 歌词" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/previousButton"

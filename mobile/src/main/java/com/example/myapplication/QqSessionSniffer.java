@@ -1,166 +1,346 @@
 package com.example.myapplication;
 
 import android.annotation.SuppressLint;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.media.MediaMetadata;
+import android.media.session.MediaController;
 import android.media.session.MediaSession;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
+import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
-import android.media.session.MediaController;
-import android.media.session.MediaSessionManager;
-import android.media.MediaMetadata;
-import android.media.session.PlaybackState;
-
 import android.support.v4.media.session.MediaSessionCompat;
-
 import android.util.Log;
 
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
+import com.example.myapplication.shared.LyricsHeuristics;
+import com.example.myapplication.shared.MediaSyncContracts;
 
 import java.util.List;
-
 
 @SuppressLint("OverrideAbstract")
 public class QqSessionSniffer extends NotificationListenerService {
 
-    private static final String QQ_PKG = "com.tencent.qqmusic";
-    private MediaController qqCtrl;
+    private static final String TAG = "SessionSniffer";
 
-    /* 当监听服务首次连接 & 每次 QQ 音乐推送新通知时，尝试刷新 Controller */
-    @Override public void onListenerConnected() { refreshCtrl(); }
-    @Override public void onNotificationPosted(StatusBarNotification sbn) {
-        if (QQ_PKG.equals(sbn.getPackageName())) refreshCtrl();
+    private MediaController activeController;
+    private String activePackage;
+    private String lastLyricsPayload = "";
+    private String lastStatus = "";
+
+    private final MediaController.Callback controllerCallback = new MediaController.Callback() {
+        @Override
+        public void onMetadataChanged(MediaMetadata metadata) {
+            inspectMetadata(metadata, "session-metadata");
+            sendToken();
+        }
+
+        @Override
+        public void onPlaybackStateChanged(PlaybackState state) {
+            broadcastStatus(
+                    MediaSyncContracts.friendlyName(activePackage)
+                            + " 状态 "
+                            + playbackLabel(state)
+            );
+        }
+    };
+
+    private final BroadcastReceiver requestReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            refreshCtrl();
+            sendToken();
+        }
+    };
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        IntentFilter filter = new IntentFilter(MediaSyncContracts.ACTION_REQUEST_REMOTE_CONTROLLER);
+        LocalBroadcastManager.getInstance(this).registerReceiver(requestReceiver, filter);
+    }
+
+    @Override
+    public void onDestroy() {
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(requestReceiver);
+        if (activeController != null) {
+            activeController.unregisterCallback(controllerCallback);
+        }
+        super.onDestroy();
+    }
+
+    @Override
+    public void onListenerConnected() {
+        refreshCtrl();
+    }
+
+    @Override
+    public void onNotificationPosted(StatusBarNotification sbn) {
+        if (sbn == null) {
+            return;
+        }
+        if (shouldInspectPackage(sbn.getPackageName())) {
+            inspectNotification(sbn);
+            refreshCtrl();
+        }
+    }
+
+    @Override
+    public void onNotificationRemoved(StatusBarNotification sbn) {
+        if (sbn != null && sbn.getPackageName() != null && sbn.getPackageName().equals(activePackage)) {
+            refreshCtrl();
+        }
+    }
+
+    private boolean shouldInspectPackage(String packageName) {
+        if (packageName == null) {
+            return false;
+        }
+        return packageName.equals(preferredPackage())
+                || packageName.equals(activePackage)
+                || packageName.equals(MediaSyncContracts.FALLBACK_TARGET_PACKAGE);
+    }
+
+    private String preferredPackage() {
+        return getSharedPreferences(MediaSyncContracts.PREFS_NAME, MODE_PRIVATE)
+                .getString(
+                        MediaSyncContracts.PREF_TARGET_PACKAGE,
+                        MediaSyncContracts.DEFAULT_TARGET_PACKAGE
+                );
     }
 
     private void refreshCtrl() {
-        MediaSessionManager sm =
-                (MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
+        MediaSessionManager manager = (MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
+        if (manager == null) {
+            broadcastStatus("系统未提供 MediaSessionManager");
+            return;
+        }
 
-        // 用自己的监听器 ComponentName 作为参数
         ComponentName me = new ComponentName(this, QqSessionSniffer.class);
-        List<MediaController> list = sm.getActiveSessions(me);   // ⬅ 改在这里
+        List<MediaController> controllers = manager.getActiveSessions(me);
+        if (controllers == null || controllers.isEmpty()) {
+            if (activeController != null) {
+                activeController.unregisterCallback(controllerCallback);
+                activeController = null;
+            }
+            activePackage = null;
+            lastLyricsPayload = "";
+            broadcastStatus("未捕获到活动播放器，请先在酷狗里播放一首歌");
+            return;
+        }
 
-        if (list == null) return;
-        for (MediaController c : list) {
-            if (QQ_PKG.equals(c.getPackageName())) {
-                if (qqCtrl == null ||
-                        !qqCtrl.getSessionToken().equals(c.getSessionToken())) {
-                    attach(c);
+        MediaController chosen = chooseController(controllers);
+        if (chosen == null) {
+            chosen = controllers.get(0);
+        }
+
+        if (activeController == null
+                || !activeController.getSessionToken().equals(chosen.getSessionToken())) {
+            attach(chosen);
+            return;
+        }
+
+        activePackage = chosen.getPackageName();
+        inspectMetadata(chosen.getMetadata(), "session-metadata");
+        sendToken();
+    }
+
+    private MediaController chooseController(List<MediaController> controllers) {
+        String preferred = preferredPackage();
+        MediaController preferredPlaying = null;
+        MediaController preferredAny = null;
+        MediaController anyPlaying = null;
+
+        for (MediaController controller : controllers) {
+            if (controller == null) {
+                continue;
+            }
+            if (preferred.equals(controller.getPackageName())) {
+                preferredAny = controller;
+                if (isPlaying(controller.getPlaybackState())) {
+                    preferredPlaying = controller;
                 }
-                break;
+            } else if (anyPlaying == null && isPlaying(controller.getPlaybackState())) {
+                anyPlaying = controller;
             }
         }
+
+        if (preferredPlaying != null) {
+            return preferredPlaying;
+        }
+        if (preferredAny != null) {
+            return preferredAny;
+        }
+        if (anyPlaying != null) {
+            return anyPlaying;
+        }
+        return controllers.isEmpty() ? null : controllers.get(0);
     }
 
-
-    private void attach(MediaController c) {
-        qqCtrl = c;
-        Log.i("QqSniffer", "🎶 绑定到 QQ 音乐 Session");
-        dumpCapabilities(c);          // ← 调试输出（只打印一次就够）
-        sendToken();                        // ★ 把 Token 提供给主界面
-
-        dumpMeta(c.getMetadata());
-        dumpState(c.getPlaybackState());
-
-        qqCtrl.registerCallback(new MediaController.Callback() {
-            @Override public void onMetadataChanged(MediaMetadata meta) {
-                dumpMeta(meta);
-                sendToken();                // 如果想每次切歌都刷新令牌（可选）
-            }
-            @Override public void onPlaybackStateChanged(PlaybackState st) {
-                dumpState(st);
-            }
-        });
+    private boolean isPlaying(PlaybackState state) {
+        return state != null && state.getState() == PlaybackState.STATE_PLAYING;
     }
 
+    private void attach(MediaController controller) {
+        if (activeController != null) {
+            activeController.unregisterCallback(controllerCallback);
+        }
+        activeController = controller;
+        activePackage = controller.getPackageName();
+        activeController.registerCallback(controllerCallback);
 
-    /* 把拿到的信息写到 Logcat 观察 */
-    private void dumpMeta(MediaMetadata meta) {
-        if (meta == null) return;
-        Log.i("QqSniffer",
-                "Meta → Title="   + meta.getString(MediaMetadata.METADATA_KEY_TITLE)  +
-                        " | Artist="      + meta.getString(MediaMetadata.METADATA_KEY_ARTIST) +
-                        " | Duration(ms)=" + meta.getLong(MediaMetadata.METADATA_KEY_DURATION));
-
-        /* 仅打印 PLAY_MODE 的 long 值 */
-        @SuppressLint("WrongConstant")
-        long rawMode = meta.getLong("ucar.media.metadata.PLAY_MODE");
-        Log.i("QqSniffer", "ucar.media.metadata.PLAY_MODE = " + rawMode);
-        // 打印 MEDIA_ID
-        Log.i("QqSniffer", "android.media.metadata.MEDIA_ID = "
-                + meta.getString(MediaMetadata.METADATA_KEY_MEDIA_ID));
-
-    }
-
-    private void dumpState(PlaybackState st) {
-        if (st == null) return;
-        String s = st.getState() == PlaybackState.STATE_PLAYING ? "PLAYING"
-                : st.getState() == PlaybackState.STATE_PAUSED  ? "PAUSED"
-                : String.valueOf(st.getState());
-        Log.i("QqSniffer",
-                "State → " + s +
-                        " | pos=" + st.getPosition() +
-                        " | actions=" + st.getActions());
+        broadcastStatus("已连接 " + MediaSyncContracts.friendlyName(activePackage) + " 的 MediaSession");
+        dumpCapabilities(controller);
+        inspectMetadata(controller.getMetadata(), "session-metadata");
+        sendToken();
     }
 
     private void sendToken() {
-        if (qqCtrl == null) return;
-
-        // ① 先拿到平台 Token（android.media.session.MediaSession.Token）
-        Object platformToken = qqCtrl.getSessionToken();
-
-        // ② 转成 support-compat Token
+        if (activeController == null) {
+            return;
+        }
         MediaSessionCompat.Token compatToken =
-                MediaSessionCompat.Token.fromToken(platformToken);
-
-        // ③ 通过本地广播传给 MainActivity
-        Intent i = new Intent("com.example.ACTION_QQ_CONTROLLER");
-        i.putExtra("binder", compatToken);        // Parcelable
-        LocalBroadcastManager.getInstance(this).sendBroadcast(i);
+                MediaSessionCompat.Token.fromToken(activeController.getSessionToken());
+        Intent intent = new Intent(MediaSyncContracts.ACTION_REMOTE_CONTROLLER);
+        intent.putExtra(MediaSyncContracts.EXTRA_CONTROLLER_TOKEN, compatToken);
+        intent.putExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE, activePackage);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
     }
 
+    private void inspectNotification(StatusBarNotification sbn) {
+        Bundle extras = sbn.getNotification() != null ? sbn.getNotification().extras : null;
+        if (extras == null || extras.isEmpty()) {
+            return;
+        }
+        for (String key : extras.keySet()) {
+            inspectValue(key, extras.get(key), "notification");
+        }
+    }
 
-    /**
-     * 调试-打印 QQ 音乐（或任何播放器）当前 MediaSession 能力
-     * 传入 **平台类** android.media.session.MediaController
-     */
-    private void dumpCapabilities(MediaController ctrl) {
+    private void inspectMetadata(MediaMetadata metadata, String source) {
+        if (metadata == null) {
+            return;
+        }
+        Log.i(
+                TAG,
+                "Meta from "
+                        + activePackage
+                        + " title="
+                        + metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
+                        + " artist="
+                        + metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
+        );
+        for (String key : metadata.keySet()) {
+            inspectValue(key, metadata.getText(key), source);
+        }
+    }
 
-        PlaybackState st = ctrl.getPlaybackState();
-        long acts = (st != null) ? st.getActions() : 0L;
+    private void inspectValue(String key, Object value, String source) {
+        if (value instanceof CharSequence) {
+            inspectTextCandidate(key, value.toString(), source);
+            return;
+        }
+        if (value instanceof CharSequence[]) {
+            CharSequence[] values = (CharSequence[]) value;
+            for (CharSequence candidate : values) {
+                inspectTextCandidate(key, candidate != null ? candidate.toString() : null, source);
+            }
+        }
+    }
 
-        Log.i("QqSniffer", "=== Playback Actions ===");
-        if ((acts & PlaybackState.ACTION_PLAY)            != 0) Log.i("QqSniffer","  • PLAY");
-        if ((acts & PlaybackState.ACTION_PAUSE)           != 0) Log.i("QqSniffer","  • PAUSE");
-        if ((acts & PlaybackState.ACTION_PLAY_PAUSE)      != 0) Log.i("QqSniffer","  • PLAY_PAUSE");
-        if ((acts & PlaybackState.ACTION_SKIP_TO_NEXT)    != 0) Log.i("QqSniffer","  • NEXT");
-        if ((acts & PlaybackState.ACTION_SKIP_TO_PREVIOUS)!= 0) Log.i("QqSniffer","  • PREVIOUS");
-        if ((acts & PlaybackState.ACTION_SEEK_TO)         != 0) Log.i("QqSniffer","  • SEEK_TO");
-        if ((acts & PlaybackState.ACTION_FAST_FORWARD)    != 0) Log.i("QqSniffer","  • FAST_FORWARD");
-        if ((acts & PlaybackState.ACTION_REWIND)          != 0) Log.i("QqSniffer","  • REWIND");
-        if ((acts & PlaybackState.ACTION_STOP)            != 0) Log.i("QqSniffer","  • STOP");
-        if ((acts & PlaybackState.ACTION_SET_RATING)      != 0) Log.i("QqSniffer","  • SET_RATING");
-        if ((acts & PlaybackState.ACTION_PLAY_FROM_MEDIA_ID)!=0)Log.i("QqSniffer","  • PLAY_FROM_ID");
+    private void inspectTextCandidate(String key, String candidate, String source) {
+        String normalized = LyricsHeuristics.normalizePayload(candidate);
+        if (normalized.isEmpty()) {
+            return;
+        }
 
-        Log.i("QqSniffer", "=== Metadata Keys ===");
-        MediaMetadata mm = ctrl.getMetadata();
-        if (mm != null) {
-            for (String k : mm.keySet()) {
-                String type = "unknown";
-                if (mm.getString(k) != null)      type = "String";
-                else if (mm.getLong(k) != 0)      type = "Long";
-                else if (mm.getBitmap(k) != null) type = "Bitmap";
-                else if (mm.getText(k) != null)   type = "CharSeq";
-                Log.i("QqSniffer", "  • " + k + " (" + type + ")");
+        boolean likelyLyrics = LyricsHeuristics.keyLooksLikeLyrics(key)
+                || LyricsHeuristics.looksLikeTimedLyrics(normalized)
+                || LyricsHeuristics.looksLikeLyricsPayload(normalized);
+
+        if (!likelyLyrics) {
+            return;
+        }
+
+        publishLyricsPayload(normalized, source + ":" + key);
+    }
+
+    private void publishLyricsPayload(String payload, String source) {
+        String normalized = LyricsHeuristics.normalizePayload(payload);
+        if (normalized.isEmpty() || normalized.equals(lastLyricsPayload)) {
+            return;
+        }
+        lastLyricsPayload = normalized;
+
+        Intent intent = new Intent(MediaSyncContracts.ACTION_LYRICS_PAYLOAD);
+        intent.putExtra(MediaSyncContracts.EXTRA_LYRICS, normalized);
+        intent.putExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE, activePackage);
+        intent.putExtra(MediaSyncContracts.EXTRA_LYRICS_SOURCE, source);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
+
+        String signal = LyricsHeuristics.looksLikeTimedLyrics(normalized)
+                ? "发现可同步歌词"
+                : "发现候选歌词";
+        broadcastStatus(MediaSyncContracts.friendlyName(activePackage) + " " + signal + "，来源 " + source);
+    }
+
+    private void broadcastStatus(String status) {
+        if (status == null || status.equals(lastStatus)) {
+            return;
+        }
+        lastStatus = status;
+        Log.i(TAG, status);
+
+        Intent intent = new Intent(MediaSyncContracts.ACTION_STATUS);
+        intent.putExtra(MediaSyncContracts.EXTRA_STATUS, status);
+        intent.putExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE, activePackage);
+        intent.putExtra(MediaSyncContracts.EXTRA_HAS_LYRICS, !lastLyricsPayload.isEmpty());
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
+    }
+
+    private String playbackLabel(PlaybackState state) {
+        if (state == null) {
+            return "UNKNOWN";
+        }
+        switch (state.getState()) {
+            case PlaybackState.STATE_PLAYING:
+                return "PLAYING";
+            case PlaybackState.STATE_PAUSED:
+                return "PAUSED";
+            case PlaybackState.STATE_BUFFERING:
+                return "BUFFERING";
+            default:
+                return String.valueOf(state.getState());
+        }
+    }
+
+    private void dumpCapabilities(MediaController controller) {
+        PlaybackState state = controller.getPlaybackState();
+        long actions = state != null ? state.getActions() : 0L;
+
+        Log.i(TAG, "=== Playback Actions ===");
+        if ((actions & PlaybackState.ACTION_PLAY) != 0) Log.i(TAG, "  PLAY");
+        if ((actions & PlaybackState.ACTION_PAUSE) != 0) Log.i(TAG, "  PAUSE");
+        if ((actions & PlaybackState.ACTION_PLAY_PAUSE) != 0) Log.i(TAG, "  PLAY_PAUSE");
+        if ((actions & PlaybackState.ACTION_SKIP_TO_NEXT) != 0) Log.i(TAG, "  NEXT");
+        if ((actions & PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0) Log.i(TAG, "  PREVIOUS");
+        if ((actions & PlaybackState.ACTION_SEEK_TO) != 0) Log.i(TAG, "  SEEK_TO");
+
+        MediaMetadata metadata = controller.getMetadata();
+        if (metadata != null) {
+            Log.i(TAG, "=== Metadata Keys ===");
+            for (String key : metadata.keySet()) {
+                Log.i(TAG, "  " + key);
             }
         }
 
-        List<MediaSession.QueueItem> q = ctrl.getQueue();
-        Log.i("QqSniffer", "Queue size = " + (q == null ? 0 : q.size()));
+        List<MediaSession.QueueItem> queue = controller.getQueue();
+        Log.i(TAG, "Queue size=" + (queue == null ? 0 : queue.size()));
     }
-
-
-
-
 }

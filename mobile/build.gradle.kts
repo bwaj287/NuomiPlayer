@@ -1,18 +1,18 @@
 plugins {
     alias(libs.plugins.android.application)
-    kotlin("android")
+    alias(libs.plugins.kotlin.android)
 }
 
 android {
     namespace = "com.example.myapplication"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.example.myapplication"
         minSdk = 28
-        targetSdk = 36
+        targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.5.0-dev"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -27,16 +27,15 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "21"
+        jvmTarget = "17"
     }
 }
 
 dependencies {
-
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.activity)
@@ -46,11 +45,8 @@ dependencies {
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
     implementation(libs.media)
-    implementation("androidx.core:core:1.16.0")
+    implementation(libs.core.ktx)
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
-    implementation("androidx.media3:media3-session:1.4.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation("androidx.media:media:1.6.0")
-// 或最新版本
-// ↑ 保持最新版
 }
