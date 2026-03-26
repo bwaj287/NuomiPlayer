@@ -86,6 +86,7 @@ public class QqSessionSniffer extends NotificationListenerService {
                 return;
             }
             String action = intent.getAction();
+            broadcastStatus("收到广播 " + compactAction(action));
             inspectTextCandidate("action", action, "broadcast-action");
             inspectBundle("broadcast", intent.getExtras(), "broadcast:" + action);
             refreshCtrl();
@@ -441,7 +442,10 @@ public class QqSessionSniffer extends NotificationListenerService {
         return source != null
                 && (source.contains("controller-extras")
                 || source.contains("playback-state")
-                || source.contains("session-event"));
+                || source.contains("session-event")
+                || source.startsWith("broadcast:")
+                || source.startsWith("scan-extras:")
+                || source.startsWith("scan-playback:"));
     }
 
     private String summarizeKeys(Bundle bundle) {
@@ -477,6 +481,17 @@ public class QqSessionSniffer extends NotificationListenerService {
             default:
                 return String.valueOf(state.getState());
         }
+    }
+
+    private String compactAction(String action) {
+        if (action == null || action.isEmpty()) {
+            return "(empty)";
+        }
+        int lastDot = action.lastIndexOf('.');
+        if (lastDot >= 0 && lastDot < action.length() - 1) {
+            return action.substring(lastDot + 1);
+        }
+        return action;
     }
 
     private void registerKugouBroadcasts() {

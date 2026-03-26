@@ -31,7 +31,12 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.example.myapplication.shared.MediaSyncContracts;
 
+import java.util.ArrayDeque;
+import java.util.Iterator;
+
 public class MainActivity extends AppCompatActivity {
+
+    private static final int MAX_DIAGNOSTIC_LINES = 5;
 
     private MediaControllerCompat remoteCtrl;
     private BroadcastReceiver tokenReceiver;
@@ -46,6 +51,9 @@ public class MainActivity extends AppCompatActivity {
 
     private String currentSourcePackage = MediaSyncContracts.DEFAULT_TARGET_PACKAGE;
     private String latestStatus = "等待捕获酷狗 MediaSession";
+    private boolean hasLyrics = false;
+    private boolean lyricsEnabled = true;
+    private final ArrayDeque<String> diagnosticLines = new ArrayDeque<>();
 
     private final MediaControllerCompat.Callback controllerCallback = new MediaControllerCompat.Callback() {
         @Override
@@ -93,6 +101,7 @@ public class MainActivity extends AppCompatActivity {
 
         registerReceivers();
         setupOpenPlayerButton();
+        pushDiagnosticLine(latestStatus);
         updateSongInfo();
         requestRemoteController();
     }
@@ -152,6 +161,7 @@ public class MainActivity extends AppCompatActivity {
                 MediaControllerCompat.setMediaController(MainActivity.this, remoteCtrl);
 
                 latestStatus = "已连接 " + MediaSyncContracts.friendlyName(currentSourcePackage);
+                pushDiagnosticLine(latestStatus);
                 updateSongInfo();
                 applyMetadata(remoteCtrl.getMetadata());
                 PlaybackStateCompat state = remoteCtrl.getPlaybackState();
@@ -169,8 +179,14 @@ public class MainActivity extends AppCompatActivity {
                 if (sourcePackage != null && !sourcePackage.isEmpty()) {
                     currentSourcePackage = sourcePackage;
                 }
+                hasLyrics = intent.getBooleanExtra(MediaSyncContracts.EXTRA_HAS_LYRICS, hasLyrics);
+                lyricsEnabled = intent.getBooleanExtra(
+                        MediaSyncContracts.EXTRA_LYRICS_ENABLED,
+                        lyricsEnabled
+                );
                 if (status != null && !status.isEmpty()) {
                     latestStatus = status;
+                    pushDiagnosticLine(status);
                     updateSongInfo();
                 }
             }
@@ -307,10 +323,42 @@ public class MainActivity extends AppCompatActivity {
         if (controls == null) {
             return;
         }
-        String info = "来源：" + MediaSyncContracts.friendlyName(currentSourcePackage)
-                + "\n"
-                + latestStatus;
-        controls.updateSongInfo(info);
+        StringBuilder info = new StringBuilder();
+        info.append("来源：")
+                .append(MediaSyncContracts.friendlyName(currentSourcePackage))
+                .append('\n');
+        info.append("歌词：")
+                .append(hasLyrics ? "已捕获" : "未捕获");
+        if (hasLyrics) {
+            info.append(lyricsEnabled ? "（已开启）" : "（已关闭）");
+        }
+
+        if (!diagnosticLines.isEmpty()) {
+            Iterator<String> iterator = diagnosticLines.iterator();
+            while (iterator.hasNext()) {
+                info.append('\n').append(iterator.next());
+            }
+        } else if (latestStatus != null && !latestStatus.isEmpty()) {
+            info.append('\n').append(latestStatus);
+        }
+        controls.updateSongInfo(info.toString());
+    }
+
+    private void pushDiagnosticLine(String line) {
+        if (line == null) {
+            return;
+        }
+        String normalized = line.trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!diagnosticLines.isEmpty() && normalized.equals(diagnosticLines.peekFirst())) {
+            return;
+        }
+        diagnosticLines.addFirst(normalized);
+        while (diagnosticLines.size() > MAX_DIAGNOSTIC_LINES) {
+            diagnosticLines.removeLast();
+        }
     }
 
     private PlaybackControlsFragment findPlaybackFragment() {
