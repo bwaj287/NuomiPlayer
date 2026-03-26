@@ -2,111 +2,97 @@
   <b>中文</b> | <a href="./README.md">English</a>
 </p>
 
-# 糯米播放器 - 音乐App Android Auto 支持
+# 糯米播放器
 
-🚗🎶 一款支持 Android Auto 的音乐App播放扩展工具，旨在提供更优雅的车载音乐体验。  
+糯米播放器是一个 Android Auto 音乐伴侣应用。它会把手机里音乐 App 暴露出来的播放状态，镜像成一个 Android Auto 可识别的本地 `MediaSession`，从而让原本不完整支持 Android Auto 的播放器，也能在车机里显示和控制。
 
-我是在买车后才发现，自己平常使用的 QQ 音乐并不支持 Android Auto，而像 Apple Music 等支持 Android Auto 的 App 又缺少我最常听的歌曲。为了解决这个困扰，我尝试了市面上的各种解决方案，但都不尽如人意。  
+这个 fork 基于原项目 [charlottejas/NuomiPlayer](https://github.com/charlottejas/NuomiPlayer)，当前重点是：
 
-其中，AnyAutoAudio 因为开发时间久远，兼容性问题较多，频繁闪退，很难稳定使用。于是我决定自己动手开发一款支持 Android Auto 的 QQ 音乐播放工具，满足自己的车载播放需求。  
+- 默认优先接入酷狗音乐 `com.kugou.android`
+- 保留 QQ 音乐兜底兼容
+- 支持 Android Auto 播放控制镜像
+- 自动探测 `MediaSession` metadata 和通知 extras 里的歌词负载
 
-由于我此前并无 Android App 开发经验，为加快开发进度，手机端播放界面部分直接使用了 Booming Music 的源代码。在此对该项目的原作者表示衷心感谢。如该使用方式不符合原项目的授权或有任何不妥，请及时与我联系，我会立即进行整改或移除。
+## 当前状态
 
-## 📄 免责声明
+这份仓库现在已经恢复到可从源码构建的状态。
 
-本项目仅供个人学习与研究使用，**不包含任何音乐资源**，也不提供音乐服务接口。涉及音乐的数据仅来源于系统媒体广播，不侵犯版权。  
-如项目中引用到的第三方代码存在授权问题，请联系我，我会立即删除或修改
+本地已验证通过：
 
-## ✨ 项目特色
+- `./gradlew clean lintDebug assembleDebug`
+- `mobile` 模块 debug APK 可正常构建
+- `automotive` 模块 debug APK 可正常构建
 
-- 🚘 支持 Android Auto 播放界面展示
-- 🎵 接入音乐App媒体数据（基于系统媒体广播）
-- ⏩ 支持播放进度条及拖动控制
-- ⏯️ 支持播放 / 暂停 / 上一首 / 下一首 控制
-- 🖼️ 显示歌曲标题、艺术家、专辑图等媒体信息
-- 📝 歌词同步显示
+需要提前说明的一点：
 
-## 📸 界面预览
+- 酷狗的播放控制和元数据镜像已经接好
+- 酷狗歌词显示目前属于“实验性支持”
+- 它是否真的能像 QQ 音乐那样稳定显示歌词，取决于酷狗有没有通过系统 `MediaSession` 或通知把可用歌词字段暴露出来
+- 如果没有暴露歌词字段，播放控制、封面、标题、歌手、进度仍然可以工作
 
-### 🚘 Android Auto 播放界面
+## 功能
 
-![Android Auto 播放界面](screenshot/auto.jpg)
-### 📝 Android Auto 歌词界面
+- Android Auto 媒体应用入口
+- 播放 / 暂停 / 上一首 / 下一首 / 拖动进度
+- 镜像歌曲标题、歌手、时长、封面
+- 手机端显示当前抓取状态和歌词探测状态
+- 支持解析 LRC 与常见 KRC 风格时间轴歌词
+- 在 Android Auto 中通过本地 metadata 覆盖显示当前歌词行
 
-![Android Auto 歌词界面](screenshot/lyrics.jpg)
+## 工作原理
 
-<h3>📱 手机端播放界面</h3>
-<div style="display:flex; gap:10px;">
-  <img src="screenshot/mobile.jpg" width="360"/>
-  <img src="screenshot/mobile_1.jpg" width="360"/>
-</div>
+项目分成三个模块：
 
+- `mobile`：手机端界面与通知监听服务
+- `shared`：本地镜像 `MediaBrowserServiceCompat` 和歌词逻辑
+- `automotive`：Android Auto 壳模块
 
-## 📋 更新日志（Changelog）
+运行链路如下：
 
-### 📦 糯米播放器 1.4.1
-- 移除部分权限需求
+1. 手机端监听当前系统里的活跃 `MediaSession`。
+2. 优先绑定酷狗音乐，必要时回退到其他活跃播放器。
+3. 把元数据、播放状态和歌词候选转发给本地镜像服务。
+4. 本地服务暴露一个标准的 Android Auto 媒体服务。
+5. 当检测到带时间轴歌词时，把当前歌词行注入本地 metadata，供 Android Auto 展示。
 
-### 📦 糯米播放器 1.4.0
-- 从特定平台适配升级为通用方案，现已支持**绝大部分播放类 App**（音乐/播客/视频等，基于系统 MediaSession/通知）。
-- 修复多个潜在问题，处理若干边界场景，减少异常与闪退概率
+## 构建
 
-### 📦 糯米播放器 1.3.1
-- 修复无法跳转网易云音乐
+环境要求：
 
-### 📦 糯米播放器 1.3.0
-- 支持网易云音乐投射播放
+- JDK 17
+- Android SDK 34
+- Android command-line tools 或 Android Studio
 
-### 📦 糯米播放器 1.2.0
-- 新增播放模式切换功能（顺序播放 / 单曲循环 / 随机播放）  
-- 增加“默认开启歌词模式”选项，支持自动启用歌词显示  
+构建命令：
 
-### 📦 糯米播放器 1.1.0
-- 新增实时歌词功能，可同步显示歌曲进度对应的歌词  
+```bash
+./gradlew clean lintDebug assembleDebug
+```
 
-### 📦 糯米播放器 1.0.0
-- 首个稳定版本发布  
-- 支持 QQ 音乐投射播放  
-- 支持 Android Auto 车载模式  
-- 支持基本播放控制（播放 / 暂停 / 上一曲 / 下一曲）
+产物路径：
 
-## 📥 APK 下载
+- `mobile/build/outputs/apk/debug/mobile-debug.apk`
+- `automotive/build/outputs/apk/debug/automotive-debug.apk`
 
-你可以直接下载安装本项目构建的 APK 文件：
-- 📦 [点击下载：糯米播放器 1.4.1.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.4.1.apk) 移除了部分权限需求，国产手机安装不了1.4.0版本的推荐下载这个
-- 📦 [点击下载：糯米播放器 1.4.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.4.0.apk) 从特定平台适配升级为通用方案，现已支持**绝大部分播放类 App**，推荐下载这个
-- 📦 [点击下载：糯米播放器 1.3.1.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.3.1.apk) 增加网易云音乐适配
-- 📦 [点击下载：糯米播放器 1.2.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.2.0.apk) 增加播放模式和默认开启歌词模式选项
-- 📦 [点击下载：糯米播放器 1.1.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.1.0.apk)
-- 📦 [点击下载：糯米播放器 1.0.0.apk](https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器%201.0.0.apk) 稳定版本
+## 安装与测试
 
+1. 在手机上安装 `mobile-debug.apk`
+2. 为糯米播放器开启“通知使用权”
+3. 打开 Android Auto 开发者模式
+4. 在 Android Auto 开发者设置里允许未知来源应用
+5. 打开酷狗音乐并开始播放
+6. 打开手机上的糯米播放器，确认底部状态文字已经显示捕获到播放器
+7. 启动 Android Auto，在媒体应用列表中打开糯米播放器
 
-> 请确保已开启 Android Auto 的开发者模式并允许安装未知来源应用，具体步骤见下方运行指南。
+如果酷狗确实把歌词负载暴露给系统，这个版本会尝试在 Android Auto 中显示同步歌词。
 
+## 说明
 
-## 🚀 如何运行
+- 本项目不包含任何音乐资源，也不提供流媒体接口
+- 它只镜像源播放器已经通过 Android 系统媒体接口暴露出来的信息
+- 仓库根目录里保留的历史 APK 主要是上游项目的旧构建产物，仅作参考，不代表当前 fork 的最新状态
 
-1. 打开 Android Auto 的开发者模式  
-   可参考官方文档：[https://developer.android.com/training/cars/testing](https://developer.android.com/training/cars/testing)
+## 致谢
 
-2. 在 Android Auto 的开发者设置中，勾选 **“允许未知来源”**
-
-3. 启动 Android Auto 模拟器或连接车机
-
-4. 在手机中打开 QQ 音乐，播放任意歌曲，即可在 Android Auto 中同步控制和查看信息
-
-> 🧪 项目默认监听系统媒体广播（如 QQ 音乐），请确保手机 QQ 音乐正在播放。
-
-## 🛠️ 技术栈
-
-- Java & Android SDK
-- Android Auto (`automotive` 模块)
-- `MediaSession` & `PlaybackStateCompat`
-- BroadcastReceiver 媒体信息解析
-- 自定义图标与主题色适配
-
-## 🙏 特别鸣谢
-
-特别感谢 [**Booming Music**](https://github.com/mardous/BoomingMusic) 项目。  
-本项目手机端界面基于其源代码构建，提供了极大帮助。
-
+- 原项目：[charlottejas/NuomiPlayer](https://github.com/charlottejas/NuomiPlayer)
+- 手机端界面参考/复用来源：[mardous/BoomingMusic](https://github.com/mardous/BoomingMusic)

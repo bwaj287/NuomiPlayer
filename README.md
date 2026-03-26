@@ -2,113 +2,96 @@
   <a href="./README.zh-CN.md">中文</a> | <b>English</b>
 </p>
 
-# NuomiPlayer - Android Auto Music Companion
+# NuomiPlayer
 
-🚗🎶 NuomiPlayer is an Android Auto companion app that extends in-car playback experience by **mirroring media metadata and controls from your phone**, providing a cleaner UI, richer info, and **time-synced lyrics**.
+NuomiPlayer is an Android Auto companion app that mirrors playback from phone music apps into a local Android Auto compatible `MediaSession`.
 
-I built this after realizing that **QQ Music does not support Android Auto**, while many Android Auto–ready apps don’t include the songs I listen to most. Existing workarounds were either outdated or unstable (e.g., frequent crashes), so I decided to build a lightweight and reliable solution for my own daily driving.
+This fork is based on the original [charlottejas/NuomiPlayer](https://github.com/charlottejas/NuomiPlayer) project and is currently focused on:
 
-> Note: I had little prior Android app experience. To accelerate development, part of the **phone playback UI** was adapted from the open-source project **Booming Music** (see Credits). If any usage violates the original license, please contact me and I will promptly fix or remove the relevant code.
+- KuGou Music (`com.kugou.android`) as the default source
+- QQ Music fallback support
+- Android Auto playback mirroring
+- lyric payload detection from `MediaSession` metadata and notification extras
 
-## Disclaimer
+## Current Status
 
-This project is for **personal learning and research** only.  
-- It does **not** include any music resources.
-- It does **not** provide any music streaming API.
-- Media data is obtained from system signals (e.g., **MediaSession / notifications / broadcast**), and is intended to avoid copyright infringement.
+This repository now builds again from source.
 
-If any third-party code usage raises licensing concerns, please reach out and I will respond quickly.
+Verified locally:
+
+- `./gradlew clean lintDebug assembleDebug`
+- `mobile` debug APK builds successfully
+- `automotive` debug APK builds successfully
+
+Important limitation:
+
+- KuGou playback control and metadata mirroring are implemented
+- KuGou lyric display is still experimental and depends on whether KuGou exposes usable lyric payloads through system metadata or notifications
+- If no lyric payload is exposed, playback control and track info still work
 
 ## Features
 
-- 🚘 Android Auto playback screen support
-- 🎵 Reads media metadata from most playback apps (based on system MediaSession / notifications)
-- ⏯️ Play / Pause / Previous / Next controls
-- ⏩ Seek bar with drag-to-seek support
-- 🖼️ Title / Artist / Album art display
-- 📝 Time-synced lyrics view (Android Auto)
+- Android Auto media app entry
+- Play, pause, previous, next, seek
+- Album art, title, artist, duration mirroring
+- On-phone status panel for session and lyric detection
+- Timed lyric parsing for LRC and common KRC-like formats
+- Android Auto lyric overlay through mirrored local metadata
 
-## Screenshots
+## How It Works
 
-### 🚘 Android Auto Playback
-![Android Auto Playback](screenshot/auto.jpg)
+The project has three modules:
 
-### 📝 Android Auto Lyrics
-![Android Auto Lyrics](screenshot/lyrics.jpg)
+- `mobile`: phone app UI and notification listener
+- `shared`: mirrored `MediaBrowserServiceCompat` and lyric overlay logic
+- `automotive`: Android Auto app shell
 
-### 📱 Phone UI
-<div style="display:flex; gap:10px;">
-  <img src="screenshot/mobile.jpg" width="360"/>
-  <img src="screenshot/mobile_1.jpg" width="360"/>
-</div>
+Runtime flow:
 
-## Changelog
+1. The phone app listens for active media sessions.
+2. It prefers KuGou, and falls back to another active player if needed.
+3. Metadata, playback state, and lyric candidates are forwarded to the local mirror service.
+4. The local service exposes a standard Android Auto media session.
+5. When timed lyrics are available, the current lyric line is injected into mirrored metadata for Android Auto display.
 
-### 1.4.1
-- Removed some permission requirements
+## Build
 
-### 1.4.0
-- Upgraded from a platform-specific adaptation to a **general solution**, now compatible with **most playback apps** (music / podcast / video) via system MediaSession/notifications
-- Fixed multiple edge cases and reduced crash probability
+Requirements:
 
-### 1.3.1
-- Fixed inability to open NetEase Cloud Music
+- JDK 17
+- Android SDK 34
+- Android command-line tools or Android Studio
 
-### 1.3.0
-- Added NetEase Cloud Music mirroring support
+Build commands:
 
-### 1.2.0
-- Added playback mode switching (in order / single loop / shuffle)
-- Added “enable lyrics mode by default” option
+```bash
+./gradlew clean lintDebug assembleDebug
+```
 
-### 1.1.0
-- Added real-time lyrics synced with playback progress
+APK outputs:
 
-### 1.0.0
-- First stable release
-- QQ Music mirroring support
-- Android Auto mode
-- Basic playback controls
+- `mobile/build/outputs/apk/debug/mobile-debug.apk`
+- `automotive/build/outputs/apk/debug/automotive-debug.apk`
 
-## APK Downloads
+## Install And Test
 
-Download prebuilt APKs:
-- 📦 NuomiPlayer 1.4.1: https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.4.1.apk  
-  (Fewer permissions; recommended if 1.4.0 fails to install on some OEM devices)
-- 📦 NuomiPlayer 1.4.0: https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.4.0.apk  
-  (General solution; recommended for most users)
-- 📦 NuomiPlayer 1.3.1: https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.3.1.apk
-- 📦 NuomiPlayer 1.2.0: https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.2.0.apk
-- 📦 NuomiPlayer 1.1.0: https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器1.1.0.apk
-- 📦 NuomiPlayer 1.0.0: https://github.com/charlottejas/NuomiPlayer/raw/main/糯米播放器%201.0.0.apk
+1. Install `mobile-debug.apk` on the phone.
+2. Grant Notification Access to NuomiPlayer.
+3. Enable Android Auto developer mode.
+4. In Android Auto developer settings, allow unknown sources.
+5. Open KuGou Music and start playback.
+6. Open NuomiPlayer on the phone and confirm the status text shows that a media session was detected.
+7. Start Android Auto and open NuomiPlayer from the media apps list.
 
-> Make sure Android Auto developer settings allow installing apps from unknown sources (see Run Guide).
+If KuGou exposes a lyric payload, the app will try to show synchronized lyrics in Android Auto.
 
-## Run Guide
+## Notes
 
-1. Enable Android Auto **Developer Mode**  
-   Official guide: https://developer.android.com/training/cars/testing
-
-2. In Android Auto developer settings, enable **Unknown sources**
-
-3. Start Android Auto emulator or connect your car head unit
-
-4. Start playing any track in your phone music app (e.g., QQ Music).  
-   NuomiPlayer will mirror the playback info and controls in Android Auto.
-
-> NuomiPlayer listens to system media signals. Make sure a playback app is actively playing.
-
-## Tech Stack
-
-- Java & Android SDK
-- Android Auto (`automotive` module)
-- MediaSession & PlaybackStateCompat
-- BroadcastReceiver-based media signal parsing
-- Custom icons & theming
+- This project does not include music resources or streaming APIs.
+- It only mirrors information already exposed by the source player through Android system media surfaces.
+- Historical APKs from the upstream project are still present in the repository root for reference, but they do not represent the current fork state.
 
 ## Credits
 
-Special thanks to **Booming Music**: https://github.com/mardous/BoomingMusic  
-Parts of the phone UI were adapted from this project.
-
-
+- Original project: [charlottejas/NuomiPlayer](https://github.com/charlottejas/NuomiPlayer)
+- Phone UI inspiration/code reuse: [mardous/BoomingMusic](https://github.com/mardous/BoomingMusic)
