@@ -34,6 +34,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
     private static final String TARGET_PACKAGE = MediaSyncContracts.DEFAULT_TARGET_PACKAGE;
     private static final long TRACK_REFRESH_WINDOW_MS = 1200L;
     private static final long SCAN_DEBOUNCE_MS = 150L;
+    private static final long POLL_INTERVAL_MS = 1000L;
     private static final Pattern TIME_PATTERN = Pattern.compile("^\\d{1,2}:\\d{2}$");
     private static final Pattern LETTER_OR_HAN_PATTERN = Pattern.compile(".*[A-Za-z\\p{IsHan}].*");
 
@@ -49,6 +50,15 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         @Override
         public void run() {
             scanVisibleKugouWindows();
+        }
+    };
+    private final Runnable pollingRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (hasVisibleKugouWindow()) {
+                scanVisibleKugouWindows();
+                handler.postDelayed(this, POLL_INTERVAL_MS);
+            }
         }
     };
 
@@ -71,6 +81,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         }
         broadcastStatus("无障碍歌词抓取已连接");
         scheduleScan();
+        schedulePolling();
     }
 
     @Override
@@ -88,6 +99,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
                 || type == AccessibilityEvent.TYPE_VIEW_SCROLLED
                 || type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
             scheduleScan();
+            schedulePolling();
         }
     }
 
@@ -106,6 +118,11 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
     private void scheduleScan() {
         handler.removeCallbacks(scanRunnable);
         handler.postDelayed(scanRunnable, SCAN_DEBOUNCE_MS);
+    }
+
+    private void schedulePolling() {
+        handler.removeCallbacks(pollingRunnable);
+        handler.post(pollingRunnable);
     }
 
     private boolean matchesTargetPackage(CharSequence packageName) {
@@ -150,7 +167,10 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         }
 
         if (looksLikeHomeScreen(nodes) && !hasLyricHint(nodes)) {
-            reportNoMatch("无障碍当前在酷狗首页，请打开正在播放页或桌面歌词", signatureFor(nodes));
+            reportNoMatch(
+                    "无障碍当前在酷狗首页，请点底部播放器进入正在播放页",
+                    signatureFor(nodes)
+            );
             return;
         }
 
@@ -381,18 +401,54 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
 
     private String buildNoMatchStatus(List<NodeText> nodes) {
         StringBuilder builder = new StringBuilder("无障碍未命中歌词");
+        String samples = summarizeVisibleTexts(nodes);
+        if (!samples.isEmpty()) {
+            builder.append("，看到 ").append(samples);
+        } else {
+            int appended = 0;
+            for (NodeText node : nodes) {
+                String viewId = node.viewId;
+                if (viewId == null || viewId.isEmpty()) {
+                    continue;
+                }
+                if (appended == 0) {
+                    builder.append("，节点 ");
+                } else {
+                    builder.append(", ");
+                }
+                builder.append(shortId(viewId));
+                appended++;
+                if (appended >= 3) {
+                    break;
+                }
+            }
+        }
+        return builder.toString();
+    }
+
+    private String summarizeVisibleTexts(List<NodeText> nodes) {
+        StringBuilder builder = new StringBuilder();
         int appended = 0;
+        Set<String> seen = new HashSet<>();
         for (NodeText node : nodes) {
-            String viewId = node.viewId;
-            if (viewId == null || viewId.isEmpty()) {
+            String normalized = normalizeLine(node.text);
+            if (normalized.isEmpty()) {
                 continue;
             }
-            if (appended == 0) {
-                builder.append("，节点 ");
-            } else {
-                builder.append(", ");
+            if (isIgnoredPhrase(normalized)) {
+                continue;
             }
-            builder.append(shortId(viewId));
+            if (normalizeLine(currentTitle).equals(normalized)
+                    || normalizeLine(currentArtist).equals(normalized)) {
+                continue;
+            }
+            if (!seen.add(normalized)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append(clip(normalized, 12));
             appended++;
             if (appended >= 3) {
                 break;
@@ -541,6 +597,13 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
                 .replace('\u00A0', ' ')
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    private String clip(String value, int maxChars) {
+        if (value == null || value.length() <= maxChars) {
+            return value == null ? "" : value;
+        }
+        return value.substring(0, Math.max(maxChars - 1, 1)) + "…";
     }
 
     private static final class NodeText {
