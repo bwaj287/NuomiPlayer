@@ -37,6 +37,7 @@ public class QqSessionSniffer extends NotificationListenerService {
     private String lastLyricsPayload = "";
     private String lastStatus = "";
     private boolean kugouReceiverRegistered;
+    private KugouPrivateBridge kugouPrivateBridge;
 
     private final MediaController.Callback controllerCallback = new MediaController.Callback() {
         @Override
@@ -99,12 +100,28 @@ public class QqSessionSniffer extends NotificationListenerService {
         IntentFilter filter = new IntentFilter(MediaSyncContracts.ACTION_REQUEST_REMOTE_CONTROLLER);
         LocalBroadcastManager.getInstance(this).registerReceiver(requestReceiver, filter);
         registerKugouBroadcasts();
+        kugouPrivateBridge = new KugouPrivateBridge(this, new KugouPrivateBridge.Listener() {
+            @Override
+            public void onStatus(String status) {
+                broadcastStatus(status);
+            }
+
+            @Override
+            public void onLyricsPayload(String payload, String source) {
+                publishLyricsPayload(payload, source);
+            }
+        });
+        kugouPrivateBridge.attach();
     }
 
     @Override
     public void onDestroy() {
         LocalBroadcastManager.getInstance(this).unregisterReceiver(requestReceiver);
         unregisterKugouBroadcasts();
+        if (kugouPrivateBridge != null) {
+            kugouPrivateBridge.shutdown();
+            kugouPrivateBridge = null;
+        }
         if (activeController != null) {
             activeController.unregisterCallback(controllerCallback);
         }
@@ -114,6 +131,7 @@ public class QqSessionSniffer extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         refreshCtrl();
+        requestPrivateBridgeConnect("listener-connected");
     }
 
     @Override
@@ -122,6 +140,9 @@ public class QqSessionSniffer extends NotificationListenerService {
             return;
         }
         if (shouldInspectPackage(sbn.getPackageName())) {
+            if (MediaSyncContracts.DEFAULT_TARGET_PACKAGE.equals(sbn.getPackageName())) {
+                requestPrivateBridgeConnect("notification");
+            }
             inspectNotification(sbn);
             refreshCtrl();
         }
@@ -185,6 +206,9 @@ public class QqSessionSniffer extends NotificationListenerService {
 
         activePackage = chosen.getPackageName();
         inspectMetadata(chosen.getMetadata(), "session-metadata");
+        if (MediaSyncContracts.DEFAULT_TARGET_PACKAGE.equals(activePackage)) {
+            requestPrivateBridgeConnect("refreshCtrl");
+        }
         sendToken();
     }
 
@@ -219,11 +243,20 @@ public class QqSessionSniffer extends NotificationListenerService {
         activeController.registerCallback(controllerCallback);
 
         broadcastStatus("已连接 " + MediaSyncContracts.friendlyName(activePackage) + " 的 MediaSession");
+        if (MediaSyncContracts.DEFAULT_TARGET_PACKAGE.equals(activePackage)) {
+            requestPrivateBridgeConnect("attach");
+        }
         dumpCapabilities(controller);
         inspectMetadata(controller.getMetadata(), "session-metadata");
         inspectControllerExtras(controller, "controller-extras");
         inspectPlaybackState(controller.getPlaybackState(), "playback-state");
         sendToken();
+    }
+
+    private void requestPrivateBridgeConnect(String trigger) {
+        if (kugouPrivateBridge != null) {
+            kugouPrivateBridge.requestConnect(trigger);
+        }
     }
 
     private void scanControllers(List<MediaController> controllers) {
