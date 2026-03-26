@@ -53,6 +53,7 @@ public class MainActivity extends AppCompatActivity {
     private String latestStatus = "等待捕获酷狗 MediaSession";
     private boolean hasLyrics = false;
     private boolean lyricsEnabled = true;
+    private boolean accessibilityEnabled = false;
     private final ArrayDeque<String> diagnosticLines = new ArrayDeque<>();
 
     private final MediaControllerCompat.Callback controllerCallback = new MediaControllerCompat.Callback() {
@@ -100,6 +101,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         registerReceivers();
+        setupAccessibilityButton();
         setupOpenPlayerButton();
         pushDiagnosticLine(latestStatus);
         updateSongInfo();
@@ -109,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        refreshAccessibilityState();
         requestRemoteController();
     }
 
@@ -149,6 +152,9 @@ public class MainActivity extends AppCompatActivity {
 
                 String sourcePackage = intent.getStringExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE);
                 if (sourcePackage != null && !sourcePackage.isEmpty()) {
+                    if (!sourcePackage.equals(currentSourcePackage)) {
+                        hasLyrics = false;
+                    }
                     currentSourcePackage = sourcePackage;
                 }
 
@@ -177,9 +183,13 @@ public class MainActivity extends AppCompatActivity {
                 String sourcePackage = intent.getStringExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE);
                 String status = intent.getStringExtra(MediaSyncContracts.EXTRA_STATUS);
                 if (sourcePackage != null && !sourcePackage.isEmpty()) {
+                    if (!sourcePackage.equals(currentSourcePackage)) {
+                        hasLyrics = false;
+                    }
                     currentSourcePackage = sourcePackage;
                 }
-                hasLyrics = intent.getBooleanExtra(MediaSyncContracts.EXTRA_HAS_LYRICS, hasLyrics);
+                hasLyrics = hasLyrics
+                        || intent.getBooleanExtra(MediaSyncContracts.EXTRA_HAS_LYRICS, false);
                 lyricsEnabled = intent.getBooleanExtra(
                         MediaSyncContracts.EXTRA_LYRICS_ENABLED,
                         lyricsEnabled
@@ -206,6 +216,11 @@ public class MainActivity extends AppCompatActivity {
     private void setupOpenPlayerButton() {
         Button openPlayerButton = findViewById(R.id.btn_open_player);
         openPlayerButton.setOnClickListener(view -> openPreferredPlayer());
+    }
+
+    private void setupAccessibilityButton() {
+        Button accessibilityButton = findViewById(R.id.btn_accessibility_settings);
+        accessibilityButton.setOnClickListener(view -> openAccessibilitySettings());
     }
 
     private void openPreferredPlayer() {
@@ -236,6 +251,16 @@ public class MainActivity extends AppCompatActivity {
         LocalBroadcastManager.getInstance(this).sendBroadcast(request);
     }
 
+    private void refreshAccessibilityState() {
+        accessibilityEnabled = isAccessibilityEnabled();
+        pushDiagnosticLine(
+                accessibilityEnabled
+                        ? "无障碍歌词抓取已启用"
+                        : "请启用“酷狗歌词抓取”无障碍服务"
+        );
+        updateSongInfo();
+    }
+
     private boolean isNlEnabled() {
         String pkg = getPackageName();
         String flat = new ComponentName(pkg, QqSessionSniffer.class.getName()).flattenToString();
@@ -256,6 +281,26 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private boolean isAccessibilityEnabled() {
+        String enabled = Settings.Secure.getString(
+                getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        );
+        if (enabled == null || enabled.isEmpty()) {
+            return false;
+        }
+        String flat = new ComponentName(
+                this,
+                KugouLyricsAccessibilityService.class
+        ).flattenToString();
+        return enabled.contains(flat);
+    }
+
+    private void openAccessibilitySettings() {
+        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        startActivity(intent);
     }
 
     private void applyMetadata(MediaMetadataCompat metadata) {
@@ -326,6 +371,9 @@ public class MainActivity extends AppCompatActivity {
         StringBuilder info = new StringBuilder();
         info.append("来源：")
                 .append(MediaSyncContracts.friendlyName(currentSourcePackage))
+                .append('\n');
+        info.append("无障碍：")
+                .append(accessibilityEnabled ? "已开启" : "未开启")
                 .append('\n');
         info.append("歌词：")
                 .append(hasLyrics ? "已捕获" : "未捕获");

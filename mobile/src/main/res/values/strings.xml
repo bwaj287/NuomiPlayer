@@ -2,4 +2,8 @@
     <string name="app_name">糯米播放器</string>
     <string name="playing_queue_label">Playing queue</string>
     <string name="action_show_lyrics">Show lyrics</string>
+    <string name="accessibility_service_label">酷狗歌词抓取</string>
+    <string name="accessibility_service_description">读取酷狗界面中的歌词文本，并同步到 Android Auto。</string>
+    <string name="open_player_button">打开酷狗音乐</string>
+    <string name="open_accessibility_settings_button">启用歌词抓取</string>
 </resources>
