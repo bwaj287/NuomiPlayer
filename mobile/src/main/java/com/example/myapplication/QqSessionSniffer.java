@@ -22,6 +22,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.example.myapplication.shared.LyricsHeuristics;
 import com.example.myapplication.shared.MediaSyncContracts;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @SuppressLint("OverrideAbstract")
@@ -38,16 +39,32 @@ public class QqSessionSniffer extends NotificationListenerService {
         @Override
         public void onMetadataChanged(MediaMetadata metadata) {
             inspectMetadata(metadata, "session-metadata");
+            inspectControllerExtras(activeController, "controller-extras");
             sendToken();
         }
 
         @Override
         public void onPlaybackStateChanged(PlaybackState state) {
+            inspectPlaybackState(state, "playback-state");
             broadcastStatus(
                     MediaSyncContracts.friendlyName(activePackage)
                             + " 状态 "
                             + playbackLabel(state)
             );
+        }
+
+        @Override
+        public void onExtrasChanged(Bundle extras) {
+            inspectBundle("controller", extras, "controller-extras");
+        }
+
+        @Override
+        public void onSessionEvent(String event, Bundle extras) {
+            inspectTextCandidate("event", event, "session-event-name");
+            inspectBundle("sessionEvent", extras, "session-event");
+            if (event != null && !event.isEmpty()) {
+                broadcastStatus("收到 " + MediaSyncContracts.friendlyName(activePackage) + " session event: " + event);
+            }
         }
     };
 
@@ -198,6 +215,8 @@ public class QqSessionSniffer extends NotificationListenerService {
         broadcastStatus("已连接 " + MediaSyncContracts.friendlyName(activePackage) + " 的 MediaSession");
         dumpCapabilities(controller);
         inspectMetadata(controller.getMetadata(), "session-metadata");
+        inspectControllerExtras(controller, "controller-extras");
+        inspectPlaybackState(controller.getPlaybackState(), "playback-state");
         sendToken();
     }
 
@@ -218,9 +237,7 @@ public class QqSessionSniffer extends NotificationListenerService {
         if (extras == null || extras.isEmpty()) {
             return;
         }
-        for (String key : extras.keySet()) {
-            inspectValue(key, extras.get(key), "notification");
-        }
+        inspectBundle("notification", extras, "notification");
     }
 
     private void inspectMetadata(MediaMetadata metadata, String source) {
@@ -241,7 +258,56 @@ public class QqSessionSniffer extends NotificationListenerService {
         }
     }
 
+    private void inspectControllerExtras(MediaController controller, String source) {
+        if (controller == null) {
+            return;
+        }
+        inspectBundle("controller", controller.getExtras(), source);
+    }
+
+    private void inspectPlaybackState(PlaybackState state, String source) {
+        if (state == null) {
+            return;
+        }
+        inspectBundle("playbackState", state.getExtras(), source + "-extras");
+        List<PlaybackState.CustomAction> actions = state.getCustomActions();
+        if (actions == null) {
+            return;
+        }
+        for (PlaybackState.CustomAction action : actions) {
+            if (action == null) {
+                continue;
+            }
+            inspectTextCandidate("action", action.getAction(), source + "-customAction");
+            inspectTextCandidate(
+                    "name",
+                    action.getName() != null ? action.getName().toString() : null,
+                    source + "-customAction"
+            );
+            inspectBundle(action.getAction(), action.getExtras(), source + "-customAction");
+        }
+    }
+
+    private void inspectBundle(String key, Bundle extras, String source) {
+        if (extras == null || extras.isEmpty()) {
+            return;
+        }
+        if (shouldReportBundle(source)) {
+            broadcastStatus("检查 " + source + " keys: " + summarizeKeys(extras));
+        }
+        for (String childKey : extras.keySet()) {
+            inspectValue(key + "." + childKey, extras.get(childKey), source, 0);
+        }
+    }
+
     private void inspectValue(String key, Object value, String source) {
+        inspectValue(key, value, source, 0);
+    }
+
+    private void inspectValue(String key, Object value, String source, int depth) {
+        if (depth > 3 || value == null) {
+            return;
+        }
         if (value instanceof CharSequence) {
             inspectTextCandidate(key, value.toString(), source);
             return;
@@ -251,6 +317,40 @@ public class QqSessionSniffer extends NotificationListenerService {
             for (CharSequence candidate : values) {
                 inspectTextCandidate(key, candidate != null ? candidate.toString() : null, source);
             }
+            return;
+        }
+        if (value instanceof Bundle) {
+            Bundle bundle = (Bundle) value;
+            for (String childKey : bundle.keySet()) {
+                inspectValue(key + "." + childKey, bundle.get(childKey), source, depth + 1);
+            }
+            return;
+        }
+        if (value instanceof String[]) {
+            String[] values = (String[]) value;
+            for (String candidate : values) {
+                inspectTextCandidate(key, candidate, source);
+            }
+            return;
+        }
+        if (value instanceof List<?>) {
+            List<?> values = (List<?>) value;
+            int index = 0;
+            for (Object candidate : values) {
+                inspectValue(key + "[" + index + "]", candidate, source, depth + 1);
+                index++;
+                if (index >= 8) {
+                    break;
+                }
+            }
+            return;
+        }
+        if (value instanceof byte[]) {
+            byte[] bytes = (byte[]) value;
+            if (bytes.length == 0 || bytes.length > 32_768) {
+                return;
+            }
+            inspectTextCandidate(key, new String(bytes, StandardCharsets.UTF_8), source);
         }
     }
 
@@ -302,6 +402,32 @@ public class QqSessionSniffer extends NotificationListenerService {
         intent.putExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE, activePackage);
         intent.putExtra(MediaSyncContracts.EXTRA_HAS_LYRICS, !lastLyricsPayload.isEmpty());
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
+    }
+
+    private boolean shouldReportBundle(String source) {
+        return source != null
+                && (source.contains("controller-extras")
+                || source.contains("playback-state")
+                || source.contains("session-event"));
+    }
+
+    private String summarizeKeys(Bundle bundle) {
+        StringBuilder builder = new StringBuilder();
+        int index = 0;
+        for (String key : bundle.keySet()) {
+            if (index > 0) {
+                builder.append(", ");
+            }
+            builder.append(key);
+            index++;
+            if (index >= 5) {
+                break;
+            }
+        }
+        if (bundle.keySet().size() > 5) {
+            builder.append("...");
+        }
+        return builder.toString();
     }
 
     private String playbackLabel(PlaybackState state) {
