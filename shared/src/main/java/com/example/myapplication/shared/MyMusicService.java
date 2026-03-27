@@ -377,7 +377,11 @@ public class MyMusicService extends MediaBrowserServiceCompat {
 
     private MediaMetadataCompat buildSessionMetadata() {
         MediaMetadataCompat.Builder builder = new MediaMetadataCompat.Builder();
+        String originalTitle = "";
+        String originalArtist = "";
         if (lastRemoteMetadata != null) {
+            originalTitle = safeText(lastRemoteMetadata, MediaMetadataCompat.METADATA_KEY_TITLE);
+            originalArtist = safeText(lastRemoteMetadata, MediaMetadataCompat.METADATA_KEY_ARTIST);
             copyText(builder, lastRemoteMetadata, MediaMetadataCompat.METADATA_KEY_TITLE);
             copyText(builder, lastRemoteMetadata, MediaMetadataCompat.METADATA_KEY_ARTIST);
             copyText(builder, lastRemoteMetadata, MediaMetadataCompat.METADATA_KEY_ALBUM);
@@ -402,11 +406,37 @@ public class MyMusicService extends MediaBrowserServiceCompat {
         }
 
         if (lyricsEnabled && hasLyrics()) {
-            String lyricLine = resolveCurrentLyricLine();
-            if (!lyricLine.isEmpty()) {
-                builder.putText(MediaMetadataCompat.METADATA_KEY_ARTIST, lyricLine);
-                builder.putText(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, lyricLine);
-                builder.putText(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, lyricLine);
+            String primaryLyric = resolveCurrentLyricLine();
+            if (!primaryLyric.isEmpty()) {
+                String secondaryLyric = resolveSecondaryLyricLine(primaryLyric);
+                builder.putText(MediaMetadataCompat.METADATA_KEY_TITLE, primaryLyric);
+                builder.putText(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, primaryLyric);
+
+                if (!secondaryLyric.isEmpty()) {
+                    builder.putText(MediaMetadataCompat.METADATA_KEY_ARTIST, secondaryLyric);
+                    builder.putText(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, secondaryLyric);
+                    builder.putText(
+                            MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION,
+                            buildSongContext(originalTitle, originalArtist)
+                    );
+                } else {
+                    String fallbackSubtitle = !originalTitle.isEmpty()
+                            ? originalTitle
+                            : originalArtist;
+                    if (!fallbackSubtitle.isEmpty()) {
+                        builder.putText(MediaMetadataCompat.METADATA_KEY_ARTIST, fallbackSubtitle);
+                        builder.putText(
+                                MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE,
+                                fallbackSubtitle
+                        );
+                    }
+                    if (!originalArtist.isEmpty()) {
+                        builder.putText(
+                                MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION,
+                                originalArtist
+                        );
+                    }
+                }
             }
         }
 
@@ -504,6 +534,31 @@ public class MyMusicService extends MediaBrowserServiceCompat {
         return LyricsHeuristics.firstDisplayLine(lastLyricsRaw);
     }
 
+    private String resolveSecondaryLyricLine(String primaryLyric) {
+        if (lastLyricsRaw == null || lastLyricsRaw.isEmpty()) {
+            return "";
+        }
+        String normalizedPrimary = LyricsHeuristics.normalizePayload(primaryLyric);
+        if (normalizedPrimary.isEmpty()) {
+            return "";
+        }
+        for (String line : LyricsHeuristics.normalizePayload(lastLyricsRaw).split("\n")) {
+            String cleaned = LyricsHeuristics.stripTimingMarkup(line).trim();
+            if (cleaned.isEmpty() || cleaned.equals(normalizedPrimary)) {
+                continue;
+            }
+            return cleaned;
+        }
+        return "";
+    }
+
+    private String buildSongContext(String originalTitle, String originalArtist) {
+        if (!originalTitle.isEmpty() && !originalArtist.isEmpty()) {
+            return originalTitle + " - " + originalArtist;
+        }
+        return !originalTitle.isEmpty() ? originalTitle : originalArtist;
+    }
+
     private long clockPosition() {
         PlaybackStateCompat state = lastRemoteState;
         if (state == null) {
@@ -556,6 +611,11 @@ public class MyMusicService extends MediaBrowserServiceCompat {
         if (bitmap != null) {
             builder.putBitmap(key, bitmap);
         }
+    }
+
+    private String safeText(MediaMetadataCompat source, String key) {
+        CharSequence text = source.getText(key);
+        return text == null ? "" : text.toString();
     }
 
     private static final class LyricLine {

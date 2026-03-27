@@ -31,6 +31,7 @@ import java.util.Map;
 public class QqSessionSniffer extends NotificationListenerService {
 
     private static final String TAG = "SessionSniffer";
+    private static final boolean ENABLE_PRIVATE_BRIDGE = false;
 
     private MediaController activeController;
     private String activePackage;
@@ -100,18 +101,20 @@ public class QqSessionSniffer extends NotificationListenerService {
         IntentFilter filter = new IntentFilter(MediaSyncContracts.ACTION_REQUEST_REMOTE_CONTROLLER);
         LocalBroadcastManager.getInstance(this).registerReceiver(requestReceiver, filter);
         registerKugouBroadcasts();
-        kugouPrivateBridge = new KugouPrivateBridge(this, new KugouPrivateBridge.Listener() {
-            @Override
-            public void onStatus(String status) {
-                broadcastStatus(status);
-            }
+        if (ENABLE_PRIVATE_BRIDGE) {
+            kugouPrivateBridge = new KugouPrivateBridge(this, new KugouPrivateBridge.Listener() {
+                @Override
+                public void onStatus(String status) {
+                    broadcastStatus(status);
+                }
 
-            @Override
-            public void onLyricsPayload(String payload, String source) {
-                publishLyricsPayload(payload, source);
-            }
-        });
-        kugouPrivateBridge.attach();
+                @Override
+                public void onLyricsPayload(String payload, String source) {
+                    publishLyricsPayload(payload, source);
+                }
+            });
+            kugouPrivateBridge.attach();
+        }
     }
 
     @Override
@@ -254,7 +257,7 @@ public class QqSessionSniffer extends NotificationListenerService {
     }
 
     private void requestPrivateBridgeConnect(String trigger) {
-        if (kugouPrivateBridge != null) {
+        if (ENABLE_PRIVATE_BRIDGE && kugouPrivateBridge != null) {
             kugouPrivateBridge.requestConnect(trigger);
         }
     }

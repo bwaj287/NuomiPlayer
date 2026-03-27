@@ -42,7 +42,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
             "最近播放", "歌单", "我喜欢", "本地/云盘", "关注", "音乐", "听书", "已购", "全部"
     };
     private static final String[] IGNORE_EXACT = {
-            "播放", "暂停", "下一首", "上一首", "分享", "收藏", "评论", "更多", "下载", "词", "曲"
+            "播放", "暂停", "下一首", "上一首", "分享", "收藏", "评论", "更多", "下载", "词", "曲", "歌词"
     };
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -180,7 +180,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
             return;
         }
 
-        publishLyric(candidate.text, candidate.describe());
+        publishLyric(buildLyricPayload(candidate, nodes), candidate.describe());
     }
 
     private List<AccessibilityNodeInfo> collectRoots() {
@@ -286,7 +286,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
     }
 
     private int scoreNode(NodeText node) {
-        String normalized = normalizeLine(node.text);
+        String normalized = flattenForComparison(node.text);
         if (normalized.isEmpty()) {
             return Integer.MIN_VALUE;
         }
@@ -299,8 +299,8 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         if (isIgnoredPhrase(normalized)) {
             return Integer.MIN_VALUE;
         }
-        if (normalizeLine(currentTitle).equals(normalized)
-                || normalizeLine(currentArtist).equals(normalized)) {
+        if (flattenForComparison(currentTitle).equals(normalized)
+                || flattenForComparison(currentArtist).equals(normalized)) {
             return Integer.MIN_VALUE;
         }
 
@@ -314,7 +314,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         if (LyricsHeuristics.looksLikeLyricsPayload(normalized)) {
             score += 2000;
         }
-        if (normalized.contains("\n")) {
+        if (node.text.contains("\n")) {
             score += 1200;
         }
         if (node.text.equals(lastPublishedLyric)) {
@@ -431,15 +431,15 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         int appended = 0;
         Set<String> seen = new HashSet<>();
         for (NodeText node : nodes) {
-            String normalized = normalizeLine(node.text);
+            String normalized = flattenForComparison(node.text);
             if (normalized.isEmpty()) {
                 continue;
             }
             if (isIgnoredPhrase(normalized)) {
                 continue;
             }
-            if (normalizeLine(currentTitle).equals(normalized)
-                    || normalizeLine(currentArtist).equals(normalized)) {
+            if (flattenForComparison(currentTitle).equals(normalized)
+                    || flattenForComparison(currentArtist).equals(normalized)) {
                 continue;
             }
             if (!seen.add(normalized)) {
@@ -555,7 +555,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         if (text == null || text.isEmpty()) {
             return true;
         }
-        String normalized = text.trim();
+        String normalized = flattenForComparison(text);
         for (String ignored : IGNORE_EXACT) {
             if (ignored.equals(normalized)) {
                 return true;
@@ -593,10 +593,103 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         if (raw == null) {
             return "";
         }
-        return raw.toString()
+        String normalized = raw.toString()
+                .replace('\u00A0', ' ')
+                .replace("\r\n", "\n")
+                .replace('\r', '\n');
+        String[] lines = normalized.split("\n");
+        StringBuilder builder = new StringBuilder();
+        for (String line : lines) {
+            String cleaned = line.replaceAll("\\s+", " ").trim();
+            if (cleaned.isEmpty()) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(cleaned);
+        }
+        return builder.toString();
+    }
+
+    private String flattenForComparison(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return raw.replace('\n', ' ')
                 .replace('\u00A0', ' ')
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    private String buildLyricPayload(NodeText candidate, List<NodeText> nodes) {
+        if (candidate.text.contains("\n")) {
+            return candidate.text;
+        }
+
+        List<NodeText> group = new ArrayList<>();
+        group.add(candidate);
+
+        for (NodeText node : nodes) {
+            if (node == candidate) {
+                continue;
+            }
+            if (!shouldMergeWithCandidate(candidate, node)) {
+                continue;
+            }
+            group.add(node);
+        }
+
+        if (group.size() == 1) {
+            return candidate.text;
+        }
+
+        group.sort((left, right) -> Integer.compare(left.bounds.top, right.bounds.top));
+        StringBuilder builder = new StringBuilder();
+        Set<String> seen = new HashSet<>();
+        for (NodeText node : group) {
+            String normalized = normalizeLine(node.text);
+            if (normalized.isEmpty() || !seen.add(normalized)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(normalized);
+            if (seen.size() >= 2) {
+                break;
+            }
+        }
+        return builder.length() == 0 ? candidate.text : builder.toString();
+    }
+
+    private boolean shouldMergeWithCandidate(NodeText candidate, NodeText other) {
+        String otherText = flattenForComparison(other.text);
+        if (otherText.isEmpty() || isIgnoredPhrase(other.text)) {
+            return false;
+        }
+        if (flattenForComparison(currentTitle).equals(otherText)
+                || flattenForComparison(currentArtist).equals(otherText)) {
+            return false;
+        }
+        if (TIME_PATTERN.matcher(otherText).matches()) {
+            return false;
+        }
+        Rect base = candidate.bounds;
+        Rect compare = other.bounds;
+        if (base.isEmpty() || compare.isEmpty()) {
+            return false;
+        }
+        int horizontalDistance = Math.abs(base.centerX() - compare.centerX());
+        int verticalDistance = Math.abs(base.centerY() - compare.centerY());
+        int widthAllowance = Math.max(candidate.windowBounds.width() / 3, 1);
+        int heightAllowance = Math.max(candidate.windowBounds.height() / 5, 1);
+        if (horizontalDistance > widthAllowance || verticalDistance > heightAllowance) {
+            return false;
+        }
+        return !other.clickable
+                && !other.focusable
+                && Math.abs(other.depth - candidate.depth) <= 2;
     }
 
     private String clip(String value, int maxChars) {
