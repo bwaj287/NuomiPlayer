@@ -6,53 +6,66 @@
 
 小老王播放器是一个 Android Auto 音乐伴侣应用。它会把手机里音乐 App 暴露出来的播放状态，镜像成一个 Android Auto 可识别的本地 `MediaSession`，从而让原本不完整支持 Android Auto 的播放器，也能在车机里显示和控制。
 
-这个 fork 基于原项目 [charlottejas/NuomiPlayer](https://github.com/charlottejas/NuomiPlayer)，当前重点是：
+这个 fork 基于原项目 [charlottejas/NuomiPlayer](https://github.com/charlottejas/NuomiPlayer)，但当前已经更偏向“实际可在车里测试和使用”的酷狗歌词镜像版本。
+
+## 这个版本能做什么
 
 - 默认优先接入酷狗音乐 `com.kugou.android`
 - 保留 QQ 音乐兜底兼容
-- 支持 Android Auto 播放控制镜像
-- 自动探测 `MediaSession` metadata 和通知 extras 里的歌词负载
+- 镜像播放 / 暂停 / 上一首 / 下一首 / 拖动进度
+- 镜像封面、标题、歌手、时长，以及适合车机显示的播放状态
+- 尝试从以下来源抓歌词：
+  - 系统 `MediaSession` metadata / extras
+  - 通知 extras
+  - 酷狗前台可见界面的无障碍文本
+- 把当前歌词行注入本地镜像 metadata，供 Android Auto 在播放页展示
+- 手机端显示诊断信息，并提供一个简单的 `车载常亮` 暗屏测试模式
 
 ## 当前状态
 
-这份仓库现在已经恢复到可从源码构建的状态。
+这份仓库已经恢复到可从源码构建、可打包、可真机测试的状态。
 
-本地已验证通过：
+本地已验证：
 
-- `./gradlew clean lintDebug assembleDebug`
-- `mobile` 模块 debug APK 可正常构建
-- `automotive` 模块 debug APK 可正常构建
+- `./gradlew :mobile:assembleDebug`
+- `mobile/build/outputs/apk/debug/mobile-debug.apk` 可正常生成
 
-需要提前说明的一点：
+当前表现：
 
-- 酷狗的播放控制和元数据镜像已经接好
-- 酷狗歌词显示目前属于“实验性支持”
-- 它是否真的能像 QQ 音乐那样稳定显示歌词，取决于酷狗有没有通过系统 `MediaSession` 或通知把可用歌词字段暴露出来
-- 如果没有暴露歌词字段，播放控制、封面、标题、歌手、进度仍然可以工作
-
-## 功能
-
-- Android Auto 媒体应用入口
-- 播放 / 暂停 / 上一首 / 下一首 / 拖动进度
-- 镜像歌曲标题、歌手、时长、封面
-- 手机端显示当前抓取状态和歌词探测状态
-- 支持解析 LRC 与常见 KRC 风格时间轴歌词
-- 在 Android Auto 中通过本地 metadata 覆盖显示当前歌词行
+- 播放控制和元数据镜像已经比较稳定
+- 酷狗歌词属于“实验性支持”
+- 目前最可靠的歌词来源是无障碍读取“前台可见的酷狗歌词文本”
+- Android Auto 的最终排版由车机宿主决定，所以字体大小、行数和位置无法完全自定义
 
 ## 工作原理
 
-项目分成三个模块：
-
-- `mobile`：手机端界面与通知监听服务
-- `shared`：本地镜像 `MediaBrowserServiceCompat` 和歌词逻辑
-
-运行链路如下：
+运行链路：
 
 1. 手机端监听当前系统里的活跃 `MediaSession`。
 2. 优先绑定酷狗音乐，必要时回退到其他活跃播放器。
 3. 把元数据、播放状态和歌词候选转发给本地镜像服务。
 4. 本地服务暴露一个标准的 Android Auto 媒体服务。
-5. 当检测到带时间轴歌词时，把当前歌词行注入本地 metadata，供 Android Auto 展示。
+5. 当检测到歌词时，把当前歌词行注入本地 metadata，供 Android Auto 展示。
+
+当前尝试的歌词来源：
+
+- 标准系统 metadata
+- 通知 extras
+- 酷狗前台界面的无障碍文本扫描
+
+## 已知限制
+
+- 酷狗在原生 Android 上没有给第三方开放稳定的后台歌词接口，所以实时歌词大多依赖“前台可见文本”。
+- 一旦歌词不再可见，实时歌词更新可能会停止。
+- 手机锁屏后，无障碍方案基本无法继续更新歌词。
+- `车载常亮` 只在小老王播放器本身位于前台时生效。
+- Android Auto 是模板化宿主界面，我们可以影响 title、subtitle、artwork、queue、custom action，但不能自己画一个完全自定义的歌词页。
+
+## 模块
+
+- `mobile`：手机端界面、通知监听、无障碍歌词抓取、测试辅助逻辑
+- `shared`：本地镜像 `MediaBrowserServiceCompat`、播放状态映射、队列与歌词覆盖逻辑
+- `automotive`：保留的车机资源模块
 
 ## 构建
 
@@ -65,32 +78,43 @@
 构建命令：
 
 ```bash
-./gradlew clean lintDebug assembleDebug
+./gradlew :mobile:assembleDebug
 ```
 
 产物路径：
 
 - `mobile/build/outputs/apk/debug/mobile-debug.apk`
 
-实际只需要安装 `mobile-debug.apk`。Android Auto 所需的 service 和 metadata 已经合并进这个 APK。
+当前实际只需要安装 `mobile-debug.apk`。
 
-## 安装与测试
+## 首次设置
 
 1. 在手机上安装 `mobile-debug.apk`
 2. 为小老王播放器开启“通知使用权”
-3. 打开 Android Auto 开发者模式
-4. 在 Android Auto 开发者设置里允许未知来源应用
-5. 打开酷狗音乐并开始播放
-6. 打开手机上的小老王播放器，确认底部状态文字已经显示捕获到播放器
-7. 启动 Android Auto，在媒体应用列表中打开小老王播放器
+3. 打开 app，进入系统无障碍设置并启用 `酷狗歌词抓取`
+4. 打开 Android Auto 开发者模式
+5. 在 Android Auto 开发者设置里允许未知来源应用
 
-如果酷狗确实把歌词负载暴露给系统，这个版本会尝试在 Android Auto 中显示同步歌词。
+## 推荐测试流程
+
+1. 在酷狗音乐里开始播放
+2. 尽量停留在“歌词实际可见”的酷狗前台页面
+3. 打开手机上的小老王播放器，确认底部状态已经显示捕获到播放器
+4. 如有需要，开启 `车载常亮`
+   说明：10 秒无操作后会自动把小老王播放器当前窗口调暗，触摸后恢复亮度
+5. 连接 Android Auto，在媒体应用列表中打开小老王播放器
+
+预期结果：
+
+- 车机里可以正常播放控制
+- 封面、歌曲信息会被镜像过去
+- 当歌词抓取成功时，Android Auto 会尝试显示当前歌词行
 
 ## 说明
 
 - 本项目不包含任何音乐资源，也不提供流媒体接口
-- 它只镜像源播放器已经通过 Android 系统媒体接口暴露出来的信息
-- 仓库根目录里保留的历史 APK 主要是上游项目的旧构建产物，仅作参考，不代表当前 fork 的最新状态
+- 它只镜像源播放器已经通过 Android 系统接口暴露出来的信息，或者当前前台界面里可见的歌词文本
+- GitHub 仓库名仍然是 `NuomiPlayer`，但当前安装后的应用名已经改为 `小老王播放器`
 
 ## 致谢
 
