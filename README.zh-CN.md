@@ -2,9 +2,9 @@
   <b>中文</b> | <a href="./README.md">English</a>
 </p>
 
-# 糯米播放器
+# 小老王播放器
 
-糯米播放器是一个 Android Auto 音乐伴侣应用。它会把手机里音乐 App 暴露出来的播放状态，镜像成一个 Android Auto 可识别的本地 `MediaSession`，从而让原本不完整支持 Android Auto 的播放器，也能在车机里显示和控制。
+小老王播放器是一个 Android Auto 音乐伴侣应用。它会把手机里音乐 App 暴露出来的播放状态，镜像成一个 Android Auto 可识别的本地 `MediaSession`，从而让原本不完整支持 Android Auto 的播放器，也能在车机里显示和控制。
 
 这个 fork 基于原项目 [charlottejas/NuomiPlayer](https://github.com/charlottejas/NuomiPlayer)，当前重点是：
 
@@ -77,12 +77,12 @@
 ## 安装与测试
 
 1. 在手机上安装 `mobile-debug.apk`
-2. 为糯米播放器开启“通知使用权”
+2. 为小老王播放器开启“通知使用权”
 3. 打开 Android Auto 开发者模式
 4. 在 Android Auto 开发者设置里允许未知来源应用
 5. 打开酷狗音乐并开始播放
-6. 打开手机上的糯米播放器，确认底部状态文字已经显示捕获到播放器
-7. 启动 Android Auto，在媒体应用列表中打开糯米播放器
+6. 打开手机上的小老王播放器，确认底部状态文字已经显示捕获到播放器
+7. 启动 Android Auto，在媒体应用列表中打开小老王播放器
 
 如果酷狗确实把歌词负载暴露给系统，这个版本会尝试在 Android Auto 中显示同步歌词。
 
