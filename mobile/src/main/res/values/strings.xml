@@ -4,6 +4,8 @@
     <string name="action_show_lyrics">Show lyrics</string>
     <string name="accessibility_service_label">酷狗歌词抓取</string>
     <string name="accessibility_service_description">读取酷狗界面中的歌词文本，并同步到 Android Auto。</string>
-    <string name="open_player_button">打开酷狗音乐</string>
-    <string name="open_accessibility_settings_button">启用歌词抓取</string>
+    <string name="open_player_button">打开酷狗</string>
+    <string name="open_accessibility_settings_button">歌词抓取</string>
+    <string name="enable_car_keep_awake_button">车载常亮</string>
+    <string name="disable_car_keep_awake_button">关闭常亮</string>
 </resources>

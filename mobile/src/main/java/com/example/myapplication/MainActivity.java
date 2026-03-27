@@ -16,6 +16,7 @@ import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.Toast;
 
@@ -37,12 +38,15 @@ import java.util.Iterator;
 public class MainActivity extends AppCompatActivity {
 
     private static final int MAX_DIAGNOSTIC_LINES = 5;
+    private static final long IDLE_DIM_DELAY_MS = 10_000L;
+    private static final float DIMMED_BRIGHTNESS = 0.02f;
 
     private MediaControllerCompat remoteCtrl;
     private BroadcastReceiver tokenReceiver;
     private BroadcastReceiver statusReceiver;
 
     private final Handler progressHandler = new Handler(Looper.getMainLooper());
+    private final Handler keepAwakeHandler = new Handler(Looper.getMainLooper());
     private Runnable progressTicker;
     private int lastPlaybackState = PlaybackStateCompat.STATE_NONE;
     private long lastBasePositionMs = 0L;
@@ -54,7 +58,16 @@ public class MainActivity extends AppCompatActivity {
     private boolean hasLyrics = false;
     private boolean lyricsEnabled = true;
     private boolean accessibilityEnabled = false;
+    private boolean keepAwakeModeEnabled = false;
+    private boolean screenDimmed = false;
+    private Button carKeepAwakeButton;
     private final ArrayDeque<String> diagnosticLines = new ArrayDeque<>();
+    private final Runnable dimScreenRunnable = new Runnable() {
+        @Override
+        public void run() {
+            dimScreenForCarMode();
+        }
+    };
 
     private final MediaControllerCompat.Callback controllerCallback = new MediaControllerCompat.Callback() {
         @Override
@@ -102,7 +115,9 @@ public class MainActivity extends AppCompatActivity {
 
         registerReceivers();
         setupAccessibilityButton();
+        setupCarKeepAwakeButton();
         setupOpenPlayerButton();
+        refreshCarKeepAwakeState(false);
         pushDiagnosticLine(latestStatus);
         updateSongInfo();
         requestRemoteController();
@@ -112,12 +127,23 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         refreshAccessibilityState();
+        refreshCarKeepAwakeState(true);
         requestRemoteController();
     }
 
     @Override
+    protected void onPause() {
+        cancelCarDimmer();
+        restoreNormalBrightness(false);
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        cancelCarDimmer();
+        restoreNormalBrightness(false);
         progressHandler.removeCallbacksAndMessages(null);
+        keepAwakeHandler.removeCallbacksAndMessages(null);
         if (remoteCtrl != null) {
             remoteCtrl.unregisterCallback(controllerCallback);
         }
@@ -136,6 +162,13 @@ public class MainActivity extends AppCompatActivity {
                             MediaSyncContracts.DEFAULT_TARGET_PACKAGE
                     )
                     .putBoolean(MediaSyncContracts.PREF_AUTO_LYRICS, true)
+                    .apply();
+        }
+        if (!getSharedPreferences(MediaSyncContracts.PREFS_NAME, MODE_PRIVATE)
+                .contains(MediaSyncContracts.PREF_KEEP_SCREEN_AWAKE)) {
+            getSharedPreferences(MediaSyncContracts.PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(MediaSyncContracts.PREF_KEEP_SCREEN_AWAKE, false)
                     .apply();
         }
     }
@@ -218,9 +251,33 @@ public class MainActivity extends AppCompatActivity {
         openPlayerButton.setOnClickListener(view -> openPreferredPlayer());
     }
 
+    private void setupCarKeepAwakeButton() {
+        carKeepAwakeButton = findViewById(R.id.btn_car_keep_awake);
+        carKeepAwakeButton.setOnClickListener(view -> toggleCarKeepAwakeMode());
+    }
+
     private void setupAccessibilityButton() {
         Button accessibilityButton = findViewById(R.id.btn_accessibility_settings);
         accessibilityButton.setOnClickListener(view -> openAccessibilitySettings());
+    }
+
+    private void toggleCarKeepAwakeMode() {
+        keepAwakeModeEnabled = !keepAwakeModeEnabled;
+        getSharedPreferences(MediaSyncContracts.PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putBoolean(MediaSyncContracts.PREF_KEEP_SCREEN_AWAKE, keepAwakeModeEnabled)
+                .apply();
+        if (keepAwakeModeEnabled) {
+            pushDiagnosticLine("车载常亮已开启，10秒无操作后自动暗屏");
+            restoreNormalBrightness(false);
+            scheduleCarDimmer();
+        } else {
+            pushDiagnosticLine("车载常亮已关闭");
+            cancelCarDimmer();
+            restoreNormalBrightness(true);
+        }
+        refreshCarKeepAwakeButton();
+        updateSongInfo();
     }
 
     private void openPreferredPlayer() {
@@ -251,6 +308,18 @@ public class MainActivity extends AppCompatActivity {
         LocalBroadcastManager.getInstance(this).sendBroadcast(request);
     }
 
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        if (!keepAwakeModeEnabled) {
+            return;
+        }
+        if (screenDimmed) {
+            restoreNormalBrightness(true);
+        }
+        scheduleCarDimmer();
+    }
+
     private void refreshAccessibilityState() {
         accessibilityEnabled = isAccessibilityEnabled();
         pushDiagnosticLine(
@@ -259,6 +328,74 @@ public class MainActivity extends AppCompatActivity {
                         : "请启用“酷狗歌词抓取”无障碍服务"
         );
         updateSongInfo();
+    }
+
+    private void refreshCarKeepAwakeState(boolean scheduleTimer) {
+        keepAwakeModeEnabled = getSharedPreferences(MediaSyncContracts.PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(MediaSyncContracts.PREF_KEEP_SCREEN_AWAKE, false);
+        refreshCarKeepAwakeButton();
+        if (keepAwakeModeEnabled) {
+            if (scheduleTimer) {
+                scheduleCarDimmer();
+            }
+        } else {
+            cancelCarDimmer();
+            restoreNormalBrightness(false);
+        }
+        updateSongInfo();
+    }
+
+    private void refreshCarKeepAwakeButton() {
+        if (carKeepAwakeButton == null) {
+            return;
+        }
+        carKeepAwakeButton.setText(
+                keepAwakeModeEnabled
+                        ? R.string.disable_car_keep_awake_button
+                        : R.string.enable_car_keep_awake_button
+        );
+    }
+
+    private void scheduleCarDimmer() {
+        if (!keepAwakeModeEnabled) {
+            return;
+        }
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        keepAwakeHandler.removeCallbacks(dimScreenRunnable);
+        keepAwakeHandler.postDelayed(dimScreenRunnable, IDLE_DIM_DELAY_MS);
+    }
+
+    private void cancelCarDimmer() {
+        keepAwakeHandler.removeCallbacks(dimScreenRunnable);
+    }
+
+    private void dimScreenForCarMode() {
+        if (!keepAwakeModeEnabled || isFinishing()) {
+            return;
+        }
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.screenBrightness = DIMMED_BRIGHTNESS;
+        getWindow().setAttributes(params);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (!screenDimmed) {
+            screenDimmed = true;
+            pushDiagnosticLine("车载常亮已暗屏，触摸屏幕恢复亮度");
+            updateSongInfo();
+        }
+    }
+
+    private void restoreNormalBrightness(boolean reportStatus) {
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        getWindow().setAttributes(params);
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (screenDimmed && reportStatus) {
+            pushDiagnosticLine("车载常亮已恢复亮度");
+        }
+        screenDimmed = false;
+        if (reportStatus) {
+            updateSongInfo();
+        }
     }
 
     private boolean isNlEnabled() {
@@ -375,6 +512,13 @@ public class MainActivity extends AppCompatActivity {
         info.append("无障碍：")
                 .append(accessibilityEnabled ? "已开启" : "未开启")
                 .append('\n');
+        info.append("常亮：");
+        if (!keepAwakeModeEnabled) {
+            info.append("未开启");
+        } else {
+            info.append(screenDimmed ? "已暗屏" : "监控中");
+        }
+        info.append('\n');
         info.append("歌词：")
                 .append(hasLyrics ? "已捕获" : "未捕获");
         if (hasLyrics) {

@@ -5,6 +5,7 @@ public final class MediaSyncContracts {
     public static final String PREFS_NAME = "media_sync_prefs";
     public static final String PREF_TARGET_PACKAGE = "target_package";
     public static final String PREF_AUTO_LYRICS = "auto_lyrics";
+    public static final String PREF_KEEP_SCREEN_AWAKE = "keep_screen_awake";
 
     public static final String DEFAULT_TARGET_PACKAGE = "com.kugou.android";
     public static final String FALLBACK_TARGET_PACKAGE = "com.tencent.qqmusic";

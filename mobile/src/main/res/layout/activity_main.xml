@@ -71,8 +71,15 @@
             android:id="@+id/btn_accessibility_settings"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="12dp"
+            android:layout_marginEnd="8dp"
             android:text="@string/open_accessibility_settings_button" />
+
+        <Button
+            android:id="@+id/btn_car_keep_awake"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/enable_car_keep_awake_button" />
 
         <Button
             android:id="@+id/btn_open_player"
