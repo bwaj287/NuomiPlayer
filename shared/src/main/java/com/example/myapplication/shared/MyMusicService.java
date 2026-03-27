@@ -409,33 +409,25 @@ public class MyMusicService extends MediaBrowserServiceCompat {
             String primaryLyric = resolveCurrentLyricLine();
             if (!primaryLyric.isEmpty()) {
                 String secondaryLyric = resolveSecondaryLyricLine(primaryLyric);
+                String subtitle = !originalTitle.isEmpty()
+                        ? originalTitle
+                        : (!originalArtist.isEmpty() ? originalArtist : secondaryLyric);
+                String description = !secondaryLyric.isEmpty()
+                        ? secondaryLyric
+                        : buildSongContext(originalTitle, originalArtist);
+
                 builder.putText(MediaMetadataCompat.METADATA_KEY_TITLE, primaryLyric);
                 builder.putText(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, primaryLyric);
 
-                if (!secondaryLyric.isEmpty()) {
-                    builder.putText(MediaMetadataCompat.METADATA_KEY_ARTIST, secondaryLyric);
-                    builder.putText(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, secondaryLyric);
+                if (!subtitle.isEmpty()) {
+                    builder.putText(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle);
+                    builder.putText(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle);
+                }
+                if (!description.isEmpty() && !description.equals(subtitle)) {
                     builder.putText(
                             MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION,
-                            buildSongContext(originalTitle, originalArtist)
+                            description
                     );
-                } else {
-                    String fallbackSubtitle = !originalTitle.isEmpty()
-                            ? originalTitle
-                            : originalArtist;
-                    if (!fallbackSubtitle.isEmpty()) {
-                        builder.putText(MediaMetadataCompat.METADATA_KEY_ARTIST, fallbackSubtitle);
-                        builder.putText(
-                                MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE,
-                                fallbackSubtitle
-                        );
-                    }
-                    if (!originalArtist.isEmpty()) {
-                        builder.putText(
-                                MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION,
-                                originalArtist
-                        );
-                    }
                 }
             }
         }
