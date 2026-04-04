@@ -37,7 +37,7 @@ import java.util.Iterator;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final int MAX_DIAGNOSTIC_LINES = 5;
+    private static final int MAX_DIAGNOSTIC_LINES = 10;
     private static final long IDLE_DIM_DELAY_MS = 10_000L;
     private static final float DIMMED_BRIGHTNESS = 0.02f;
 
@@ -55,6 +55,8 @@ public class MainActivity extends AppCompatActivity {
 
     private String currentSourcePackage = MediaSyncContracts.DEFAULT_TARGET_PACKAGE;
     private String latestStatus = "等待捕获酷狗 MediaSession";
+    private String latestAccessibilityStatus = "";
+    private String latestCandidateStatus = "";
     private boolean hasLyrics = false;
     private boolean lyricsEnabled = true;
     private boolean accessibilityEnabled = false;
@@ -229,6 +231,14 @@ public class MainActivity extends AppCompatActivity {
                 );
                 if (status != null && !status.isEmpty()) {
                     latestStatus = status;
+                    if (status.startsWith("无障碍命中")) {
+                        latestAccessibilityStatus = status;
+                    } else if (status.startsWith("候选 ")) {
+                        latestCandidateStatus = status;
+                    } else if (status.startsWith("无障碍")
+                            || status.contains("未命中歌词")) {
+                        latestAccessibilityStatus = status;
+                    }
                     pushDiagnosticLine(status);
                     updateSongInfo();
                 }
@@ -524,11 +534,21 @@ public class MainActivity extends AppCompatActivity {
         if (hasLyrics) {
             info.append(lyricsEnabled ? "（已开启）" : "（已关闭）");
         }
+        if (!latestAccessibilityStatus.isEmpty()) {
+            info.append('\n').append(latestAccessibilityStatus);
+        }
+        if (!latestCandidateStatus.isEmpty()) {
+            info.append('\n').append(latestCandidateStatus);
+        }
 
         if (!diagnosticLines.isEmpty()) {
             Iterator<String> iterator = diagnosticLines.iterator();
             while (iterator.hasNext()) {
-                info.append('\n').append(iterator.next());
+                String line = iterator.next();
+                if (line.equals(latestAccessibilityStatus) || line.equals(latestCandidateStatus)) {
+                    continue;
+                }
+                info.append('\n').append(line);
             }
         } else if (latestStatus != null && !latestStatus.isEmpty()) {
             info.append('\n').append(latestStatus);

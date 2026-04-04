@@ -34,6 +34,8 @@ Current behavior:
 - Playback mirroring is stable
 - KuGou lyrics are supported experimentally
 - The most reliable lyric path is accessibility-based capture from the visible KuGou player UI
+- Based on current device testing, KuGou desktop lyrics are easier to capture when the floating lyrics are left unlocked; locking them often turns the overlay into a non-readable display layer
+- The current desktop-lyrics path still has a known issue: some tracks, especially English songs, may miss every other lyric line
 - Android Auto layout is still controlled by the host, so text size and exact line placement cannot be fully customized
 
 ## How It Works
@@ -56,6 +58,8 @@ Lyric sources currently attempted:
 
 - KuGou does not expose a stable third-party background lyric API on stock Android, so real-time lyrics mostly depend on visible on-screen text.
 - If the lyric text is no longer visible, lyric updates may stop.
+- If KuGou desktop lyrics are locked in place, the current build often stops seeing readable lyric text. Unlocking the floating lyrics usually restores capture.
+- KuGou's floating desktop lyrics do not always expose a complete accessibility text stream, so the current build may still miss some lyric lines.
 - Locking the phone stops accessibility-based lyric updates.
 - The built-in car keep-awake dim mode only works while XiaoLaoWang Player itself is in the foreground.
 - Android Auto decides the final layout. We can influence the title, subtitle, artwork, queue, and custom buttons, but not build a fully custom lyrics screen.
@@ -97,10 +101,11 @@ Only `mobile-debug.apk` needs to be installed for the current workflow.
 ## Recommended Test Flow
 
 1. Start playback in KuGou Music.
-2. Keep KuGou on a page where lyric text is visibly rendered.
-3. Open XiaoLaoWang Player and confirm the bottom diagnostics show that a source was detected.
-4. Optionally enable `车载常亮` if you want the phone screen to stay awake and dim after 10 seconds of inactivity while the app is foregrounded.
-5. Connect to Android Auto and open XiaoLaoWang Player from the media app list.
+2. Keep KuGou on a page where lyric text is visibly rendered, or enable KuGou desktop lyrics.
+3. If you use KuGou desktop lyrics, keep the floating lyrics unlocked for the current build.
+4. Open XiaoLaoWang Player and confirm the bottom diagnostics show that a source was detected.
+5. Optionally enable `车载常亮` if you want the phone screen to stay awake and dim after 10 seconds of inactivity while the app is foregrounded.
+6. Connect to Android Auto and open XiaoLaoWang Player from the media app list.
 
 Expected results:
 
@@ -112,6 +117,8 @@ Expected results:
 
 - This project does not include music resources or streaming APIs.
 - It only mirrors information already exposed by the source player or visible on the source player's UI.
+- For the current implementation, KuGou foreground lyrics or unlocked desktop lyrics are the recommended modes. Locked desktop lyrics look cleaner, but they are less reliable for lyric capture.
+- If lyric stability becomes the next priority, the more promising follow-up paths are temporal tracking or OCR rather than further single-frame accessibility scoring tweaks.
 - The GitHub repository name is still `NuomiPlayer`, but the installed app name is now `小老王播放器`.
 
 ## Credits

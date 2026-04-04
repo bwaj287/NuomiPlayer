@@ -1,5 +1,7 @@
 package com.example.myapplication.shared;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -13,6 +15,8 @@ public final class LyricsHeuristics {
             Pattern.compile("<\\d+,\\d+,\\d+>");
     private static final Pattern META_LINE_TAG =
             Pattern.compile("^\\[(?:ti|ar|al|by|offset):.*]$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern HAN_PATTERN = Pattern.compile(".*\\p{IsHan}.*");
+    private static final Pattern LATIN_PATTERN = Pattern.compile(".*[A-Za-z].*");
 
     private LyricsHeuristics() {
     }
@@ -76,16 +80,94 @@ public final class LyricsHeuristics {
     }
 
     public static String firstDisplayLine(String payload) {
+        List<String> lines = displayLines(payload);
+        return lines.isEmpty() ? "" : lines.get(0);
+    }
+
+    public static List<String> displayLines(String payload) {
+        List<String> result = new ArrayList<>();
         String normalized = normalizePayload(payload);
         if (normalized.isEmpty()) {
-            return "";
+            return result;
         }
         for (String line : normalized.split("\n")) {
             String cleaned = stripTimingMarkup(line).trim();
-            if (!cleaned.isEmpty() && !META_LINE_TAG.matcher(cleaned).matches()) {
-                return cleaned;
+            if (cleaned.isEmpty() || META_LINE_TAG.matcher(cleaned).matches()) {
+                continue;
+            }
+            if (!result.isEmpty() && shouldJoinSoftWrappedLine(result.get(result.size() - 1), cleaned)) {
+                String previous = result.get(result.size() - 1);
+                result.set(result.size() - 1, previous + " " + cleaned);
+            } else {
+                result.add(cleaned);
             }
         }
-        return "";
+        return result;
+    }
+
+    private static boolean shouldJoinSoftWrappedLine(String previous, String next) {
+        if (previous == null || next == null) {
+            return false;
+        }
+        String left = previous.trim();
+        String right = next.trim();
+        if (left.isEmpty() || right.isEmpty()) {
+            return false;
+        }
+        if (containsHan(left) || containsHan(right)) {
+            return false;
+        }
+        if (!containsLatin(left) || !containsLatin(right)) {
+            return false;
+        }
+        if (left.length() < 10 || right.length() < 3) {
+            return false;
+        }
+        if (left.length() + right.length() > 140) {
+            return false;
+        }
+        if (endsWithSentencePunctuation(left) && !endsWithJoinerPunctuation(left)) {
+            return false;
+        }
+
+        char first = right.charAt(0);
+        return Character.isLowerCase(first)
+                || Character.isDigit(first)
+                || first == '\''
+                || first == '"'
+                || first == '('
+                || first == '['
+                || endsWithJoinerPunctuation(left);
+    }
+
+    private static boolean containsHan(String value) {
+        return HAN_PATTERN.matcher(value).matches();
+    }
+
+    private static boolean containsLatin(String value) {
+        return LATIN_PATTERN.matcher(value).matches();
+    }
+
+    private static boolean endsWithSentencePunctuation(String value) {
+        return value.endsWith(".")
+                || value.endsWith("!")
+                || value.endsWith("?")
+                || value.endsWith("。")
+                || value.endsWith("！")
+                || value.endsWith("？")
+                || value.endsWith("…");
+    }
+
+    private static boolean endsWithJoinerPunctuation(String value) {
+        return value.endsWith(",")
+                || value.endsWith("，")
+                || value.endsWith(":")
+                || value.endsWith("：")
+                || value.endsWith(";")
+                || value.endsWith("；")
+                || value.endsWith("-")
+                || value.endsWith("—")
+                || value.endsWith("/")
+                || value.endsWith("&");
     }
 }

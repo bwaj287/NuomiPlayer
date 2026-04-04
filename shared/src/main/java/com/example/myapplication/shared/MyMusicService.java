@@ -527,19 +527,15 @@ public class MyMusicService extends MediaBrowserServiceCompat {
     }
 
     private String resolveSecondaryLyricLine(String primaryLyric) {
-        if (lastLyricsRaw == null || lastLyricsRaw.isEmpty()) {
-            return "";
-        }
         String normalizedPrimary = LyricsHeuristics.normalizePayload(primaryLyric);
         if (normalizedPrimary.isEmpty()) {
             return "";
         }
-        for (String line : LyricsHeuristics.normalizePayload(lastLyricsRaw).split("\n")) {
-            String cleaned = LyricsHeuristics.stripTimingMarkup(line).trim();
-            if (cleaned.isEmpty() || cleaned.equals(normalizedPrimary)) {
+        for (String line : LyricsHeuristics.displayLines(lastLyricsRaw)) {
+            if (line.isEmpty() || line.equals(normalizedPrimary)) {
                 continue;
             }
-            return cleaned;
+            return line;
         }
         return "";
     }

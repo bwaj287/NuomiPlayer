@@ -2,8 +2,11 @@ package com.example.myapplication;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Rect;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -23,6 +26,8 @@ import com.example.myapplication.shared.LyricsHeuristics;
 import com.example.myapplication.shared.MediaSyncContracts;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -33,16 +38,24 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
 
     private static final String TARGET_PACKAGE = MediaSyncContracts.DEFAULT_TARGET_PACKAGE;
     private static final long TRACK_REFRESH_WINDOW_MS = 1200L;
-    private static final long SCAN_DEBOUNCE_MS = 150L;
-    private static final long POLL_INTERVAL_MS = 1000L;
+    private static final long SCAN_DEBOUNCE_MS = 60L;
+    private static final long POLL_INTERVAL_MS = 350L;
+    private static final long LYRIC_SIGNAL_WINDOW_MS = 5000L;
     private static final Pattern TIME_PATTERN = Pattern.compile("^\\d{1,2}:\\d{2}$");
     private static final Pattern LETTER_OR_HAN_PATTERN = Pattern.compile(".*[A-Za-z\\p{IsHan}].*");
+    private static final String[] OVERLAY_PACKAGES = {
+            "com.sec.android.app.launcher",
+            "com.android.systemui"
+    };
 
     private static final String[] HOME_MARKERS = {
             "最近播放", "歌单", "我喜欢", "本地/云盘", "关注", "音乐", "听书", "已购", "全部"
     };
     private static final String[] IGNORE_EXACT = {
             "播放", "暂停", "下一首", "上一首", "分享", "收藏", "评论", "更多", "下载", "词", "曲", "歌词"
+    };
+    private static final String[] IGNORE_CONTAINS = {
+            "控制界面", "进入控制", "控制器", "controller", "controls", "播放页", "播放控制"
     };
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -55,10 +68,25 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
     private final Runnable pollingRunnable = new Runnable() {
         @Override
         public void run() {
-            if (hasVisibleKugouWindow()) {
-                scanVisibleKugouWindows();
-                handler.postDelayed(this, POLL_INTERVAL_MS);
+            scanVisibleKugouWindows();
+            handler.postDelayed(this, POLL_INTERVAL_MS);
+        }
+    };
+    private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null) {
+                return;
             }
+            if (!TARGET_PACKAGE.equals(intent.getStringExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE))) {
+                return;
+            }
+            String status = intent.getStringExtra(MediaSyncContracts.EXTRA_STATUS);
+            if (!looksLikeLyricSignal(status)) {
+                return;
+            }
+            lastLyricSignalAt = SystemClock.elapsedRealtime();
+            scheduleScan();
         }
     };
 
@@ -68,6 +96,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
     private String currentTitle = "";
     private String currentArtist = "";
     private long lastTrackRefreshAt = 0L;
+    private long lastLyricSignalAt = 0L;
 
     @Override
     protected void onServiceConnected() {
@@ -79,6 +108,10 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
                     | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
             setServiceInfo(info);
         }
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                statusReceiver,
+                new IntentFilter(MediaSyncContracts.ACTION_STATUS)
+        );
         broadcastStatus("无障碍歌词抓取已连接");
         scheduleScan();
         schedulePolling();
@@ -111,6 +144,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         handler.removeCallbacksAndMessages(null);
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(statusReceiver);
         broadcastStatus("无障碍歌词抓取已断开");
         return super.onUnbind(intent);
     }
@@ -149,9 +183,25 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
     private void scanVisibleKugouWindows() {
         refreshTrackContextIfNeeded();
 
-        List<AccessibilityNodeInfo> roots = collectRoots();
+        List<AccessibilityNodeInfo> roots = collectTargetRoots();
+        boolean scanningOverlayRoots = false;
+        if (roots.isEmpty() && shouldInspectOverlayRoots()) {
+            roots = collectOverlayRoots();
+            scanningOverlayRoots = !roots.isEmpty();
+        }
         if (roots.isEmpty()) {
-            reportNoMatch("无障碍等待可见的酷狗歌词窗口", "no-window");
+            String windows = describeVisibleWindows();
+            String status;
+            if (shouldInspectOverlayRoots()) {
+                status = windows.isEmpty()
+                        ? "无障碍已收到歌词状态，但还没看到歌词浮层窗口"
+                        : "无障碍已收到歌词状态，但未见歌词浮层窗口，当前窗口 " + windows;
+            } else {
+                status = windows.isEmpty()
+                        ? "无障碍等待可见的酷狗歌词窗口"
+                        : "无障碍未见酷狗窗口，当前窗口 " + windows;
+            }
+            reportNoMatch(status, "no-window:" + windows);
             return;
         }
 
@@ -164,6 +214,17 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         if (nodes.isEmpty()) {
             reportNoMatch("无障碍已连接，但还没读到酷狗界面文本", "no-text");
             return;
+        }
+
+        if (scanningOverlayRoots) {
+            nodes = filterOverlayNodes(nodes);
+            if (nodes.isEmpty()) {
+                reportNoMatch(
+                        "无障碍看到了歌词浮层窗口，但还没读到歌词文本",
+                        "overlay-no-text:" + describeVisibleWindows()
+                );
+                return;
+            }
         }
 
         if (looksLikeHomeScreen(nodes) && !hasLyricHint(nodes)) {
@@ -180,10 +241,14 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
             return;
         }
 
-        publishLyric(buildLyricPayload(candidate, nodes), candidate.describe());
+        publishLyric(
+                buildLyricPayload(candidate, nodes),
+                candidate,
+                summarizeTopCandidates(nodes)
+        );
     }
 
-    private List<AccessibilityNodeInfo> collectRoots() {
+    private List<AccessibilityNodeInfo> collectTargetRoots() {
         List<AccessibilityNodeInfo> roots = new ArrayList<>();
         Set<Integer> identities = new HashSet<>();
 
@@ -212,6 +277,87 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
             }
         }
         return roots;
+    }
+
+    private List<AccessibilityNodeInfo> collectOverlayRoots() {
+        List<AccessibilityNodeInfo> roots = new ArrayList<>();
+        Set<Integer> identities = new HashSet<>();
+
+        List<AccessibilityWindowInfo> windows = getWindows();
+        if (windows == null) {
+            return roots;
+        }
+        for (AccessibilityWindowInfo window : windows) {
+            if (window == null) {
+                continue;
+            }
+            AccessibilityNodeInfo root = window.getRoot();
+            if (root == null || !matchesOverlayPackage(root.getPackageName())) {
+                continue;
+            }
+            int identity = System.identityHashCode(root);
+            if (identities.add(identity)) {
+                roots.add(root);
+            }
+        }
+        return roots;
+    }
+
+    private String describeVisibleWindows() {
+        List<AccessibilityWindowInfo> windows = getWindows();
+        if (windows == null || windows.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        Set<String> seen = new HashSet<>();
+        for (AccessibilityWindowInfo window : windows) {
+            if (window == null) {
+                continue;
+            }
+            AccessibilityNodeInfo root = window.getRoot();
+            if (root == null) {
+                continue;
+            }
+            CharSequence packageName = root.getPackageName();
+            String label = packageName == null ? "(unknown)" : packageName.toString();
+            if (!seen.add(label)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append(label);
+            if (seen.size() >= 4) {
+                break;
+            }
+        }
+        return builder.toString();
+    }
+
+    private boolean matchesOverlayPackage(CharSequence packageName) {
+        if (packageName == null) {
+            return false;
+        }
+        for (String candidate : OVERLAY_PACKAGES) {
+            if (candidate.contentEquals(packageName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean shouldInspectOverlayRoots() {
+        return SystemClock.elapsedRealtime() - lastLyricSignalAt <= LYRIC_SIGNAL_WINDOW_MS;
+    }
+
+    private boolean looksLikeLyricSignal(String status) {
+        if (status == null || status.isEmpty()) {
+            return false;
+        }
+        return status.contains("EVENT_LYRIC_STATE_CHANGED")
+                || status.contains("EVENT_LYLIC_STATE_CHANGED")
+                || status.contains("KEY_LYRIC_STATE")
+                || status.contains("KEY_LYRIC_LOCK_STATE");
     }
 
     private void collectNodeTexts(
@@ -318,22 +464,40 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
             score += 1200;
         }
         if (node.text.equals(lastPublishedLyric)) {
-            score += 120;
+            score -= 180;
         }
-        if (normalized.length() >= 2 && normalized.length() <= 26) {
+        if (normalized.length() >= 2 && normalized.length() <= 32) {
             score += 180;
-        } else if (normalized.length() <= 48) {
-            score += 40;
+        } else if (normalized.length() <= 72) {
+            score += 80;
+        } else if (normalized.length() <= 120) {
+            score -= 80;
         } else {
-            score -= 400;
+            score -= 260;
         }
         if (node.clickable || node.focusable) {
             score -= 120;
         } else {
             score += 80;
         }
+        if (className.contains("textview")) {
+            score += 220;
+        }
+        if (className.contains("button")) {
+            score -= 1200;
+        } else if (className.contains("image")) {
+            score -= 700;
+        } else if (className.contains("layout") || className.contains("viewgroup")) {
+            score -= 260;
+        }
         if (className.contains("edit")) {
             score -= 800;
+        }
+        if (viewId.contains("control")
+                || viewId.contains("controller")
+                || viewId.contains("button")
+                || viewId.contains("btn")) {
+            score -= 900;
         }
         if (viewId.contains("title")
                 || viewId.contains("song")
@@ -360,6 +524,9 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         }
         float verticalRatio = (bounds.centerY() - windowBounds.top)
                 / (float) Math.max(windowBounds.height(), 1);
+        if (verticalRatio >= 0.03f && verticalRatio <= 0.22f) {
+            score += 90;
+        }
         if (verticalRatio >= 0.22f && verticalRatio <= 0.78f) {
             score += 120;
         }
@@ -399,6 +566,55 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         return false;
     }
 
+    private List<NodeText> filterOverlayNodes(List<NodeText> nodes) {
+        List<NodeText> filtered = new ArrayList<>();
+        for (NodeText node : nodes) {
+            if (isLikelyOverlayLyricNode(node)) {
+                filtered.add(node);
+            }
+        }
+        return filtered;
+    }
+
+    private boolean isLikelyOverlayLyricNode(NodeText node) {
+        String normalized = flattenForComparison(node.text);
+        if (normalized.isEmpty()
+                || isIgnoredPhrase(normalized)
+                || TIME_PATTERN.matcher(normalized).matches()) {
+            return false;
+        }
+        if (flattenForComparison(currentTitle).equals(normalized)
+                || flattenForComparison(currentArtist).equals(normalized)) {
+            return false;
+        }
+        if (node.clickable || node.focusable) {
+            return false;
+        }
+
+        String className = safeLower(node.className);
+        if (className.contains("button")
+                || className.contains("image")
+                || className.contains("edit")) {
+            return false;
+        }
+
+        Rect windowBounds = node.windowBounds;
+        Rect bounds = node.bounds;
+        if (windowBounds.isEmpty() || bounds.isEmpty()) {
+            return false;
+        }
+        float verticalRatio = (bounds.centerY() - windowBounds.top)
+                / (float) Math.max(windowBounds.height(), 1);
+        if (verticalRatio < 0.0f || verticalRatio > 0.42f) {
+            return false;
+        }
+        int centerOffset = Math.abs(bounds.centerX() - windowBounds.centerX());
+        if (centerOffset > Math.max(windowBounds.width() / 2, 1)) {
+            return false;
+        }
+        return LETTER_OR_HAN_PATTERN.matcher(normalized).matches();
+    }
+
     private String buildNoMatchStatus(List<NodeText> nodes) {
         StringBuilder builder = new StringBuilder("无障碍未命中歌词");
         String samples = summarizeVisibleTexts(nodes);
@@ -422,6 +638,10 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
                     break;
                 }
             }
+        }
+        String candidates = summarizeTopCandidates(nodes);
+        if (!candidates.isEmpty()) {
+            builder.append("，候选 ").append(candidates);
         }
         return builder.toString();
     }
@@ -465,6 +685,41 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         broadcastStatus(status);
     }
 
+    private String summarizeTopCandidates(List<NodeText> nodes) {
+        List<CandidateScore> candidates = new ArrayList<>();
+        for (NodeText node : nodes) {
+            int score = scoreNode(node);
+            if (score == Integer.MIN_VALUE) {
+                continue;
+            }
+            candidates.add(new CandidateScore(node, score));
+        }
+        if (candidates.isEmpty()) {
+            return "";
+        }
+        Collections.sort(candidates, new Comparator<CandidateScore>() {
+            @Override
+            public int compare(CandidateScore left, CandidateScore right) {
+                return Integer.compare(right.score, left.score);
+            }
+        });
+        StringBuilder builder = new StringBuilder();
+        int appended = 0;
+        for (CandidateScore candidate : candidates) {
+            if (appended > 0) {
+                builder.append(" | ");
+            }
+            builder.append(candidate.node.describe())
+                    .append('#')
+                    .append(candidate.score);
+            appended++;
+            if (appended >= 3) {
+                break;
+            }
+        }
+        return builder.toString();
+    }
+
     private String signatureFor(List<NodeText> nodes) {
         StringBuilder builder = new StringBuilder();
         int count = 0;
@@ -482,7 +737,7 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         return builder.toString();
     }
 
-    private void publishLyric(String lyric, String source) {
+    private void publishLyric(String lyric, NodeText candidate, String candidates) {
         String normalized = LyricsHeuristics.normalizePayload(lyric);
         if (normalized.isEmpty() || normalized.equals(lastPublishedLyric)) {
             return;
@@ -493,10 +748,17 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         Intent intent = new Intent(MediaSyncContracts.ACTION_LYRICS_PAYLOAD);
         intent.putExtra(MediaSyncContracts.EXTRA_LYRICS, normalized);
         intent.putExtra(MediaSyncContracts.EXTRA_SOURCE_PACKAGE, TARGET_PACKAGE);
-        intent.putExtra(MediaSyncContracts.EXTRA_LYRICS_SOURCE, "accessibility:" + source);
+        intent.putExtra(
+                MediaSyncContracts.EXTRA_LYRICS_SOURCE,
+                "accessibility:" + (candidate == null ? "text" : candidate.describe())
+        );
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
 
-        broadcastStatus("无障碍捕获歌词，来源 " + source);
+        String hitLabel = candidate == null ? "text" : candidate.shortDebug();
+        broadcastStatus("无障碍命中 " + hitLabel + " -> " + clip(flattenForComparison(normalized), 28));
+        if (candidates != null && !candidates.isEmpty()) {
+            broadcastStatus("候选 " + candidates);
+        }
     }
 
     private void broadcastStatus(String status) {
@@ -558,6 +820,12 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         String normalized = flattenForComparison(text);
         for (String ignored : IGNORE_EXACT) {
             if (ignored.equals(normalized)) {
+                return true;
+            }
+        }
+        String lower = normalized.toLowerCase(Locale.US);
+        for (String ignored : IGNORE_CONTAINS) {
+            if (normalized.contains(ignored) || lower.contains(ignored)) {
                 return true;
             }
         }
@@ -624,12 +892,11 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
 
     private String buildLyricPayload(NodeText candidate, List<NodeText> nodes) {
         if (candidate.text.contains("\n")) {
-            return candidate.text;
+            return normalizePayloadLines(candidate.text);
         }
 
-        List<NodeText> group = new ArrayList<>();
-        group.add(candidate);
-
+        NodeText companion = null;
+        int companionScore = Integer.MIN_VALUE;
         for (NodeText node : nodes) {
             if (node == candidate) {
                 continue;
@@ -637,30 +904,33 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
             if (!shouldMergeWithCandidate(candidate, node)) {
                 continue;
             }
-            group.add(node);
+            int score = scoreCompanion(candidate, node);
+            if (score > companionScore) {
+                companionScore = score;
+                companion = node;
+            }
         }
 
-        if (group.size() == 1) {
-            return candidate.text;
+        String primary = normalizePayloadLines(candidate.text);
+        if (companion == null) {
+            return primary;
         }
 
-        group.sort((left, right) -> Integer.compare(left.bounds.top, right.bounds.top));
         StringBuilder builder = new StringBuilder();
         Set<String> seen = new HashSet<>();
-        for (NodeText node : group) {
-            String normalized = normalizeLine(node.text);
-            if (normalized.isEmpty() || !seen.add(normalized)) {
-                continue;
-            }
+        if (!primary.isEmpty()) {
+            builder.append(primary);
+            seen.add(primary);
+        }
+
+        String secondary = normalizePayloadLines(companion.text);
+        if (!secondary.isEmpty() && seen.add(secondary)) {
             if (builder.length() > 0) {
                 builder.append('\n');
             }
-            builder.append(normalized);
-            if (seen.size() >= 2) {
-                break;
-            }
+            builder.append(secondary);
         }
-        return builder.length() == 0 ? candidate.text : builder.toString();
+        return builder.length() == 0 ? primary : builder.toString();
     }
 
     private boolean shouldMergeWithCandidate(NodeText candidate, NodeText other) {
@@ -690,6 +960,33 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
         return !other.clickable
                 && !other.focusable
                 && Math.abs(other.depth - candidate.depth) <= 2;
+    }
+
+    private int scoreCompanion(NodeText candidate, NodeText other) {
+        int score = 0;
+        int verticalDistance = Math.abs(candidate.bounds.centerY() - other.bounds.centerY());
+        int horizontalDistance = Math.abs(candidate.bounds.centerX() - other.bounds.centerX());
+        if (other.bounds.centerY() >= candidate.bounds.centerY()) {
+            score += 400;
+        }
+        score -= verticalDistance;
+        score -= horizontalDistance / 2;
+        return score;
+    }
+
+    private String normalizePayloadLines(String raw) {
+        List<String> lines = LyricsHeuristics.displayLines(raw);
+        if (lines.isEmpty()) {
+            return normalizeLine(raw);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (String line : lines) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(line);
+        }
+        return builder.toString();
     }
 
     private String clip(String value, int maxChars) {
@@ -734,11 +1031,33 @@ public class KugouLyricsAccessibilityService extends AccessibilityService {
             return shortLabel(id) + ":" + text;
         }
 
+        private String shortDebug() {
+            String id = viewId == null || viewId.isEmpty() ? "text" : shortLabel(viewId);
+            return id + ":" + shortClip(text.replace('\n', '/'), 20);
+        }
+
         private String shortLabel(String raw) {
             int slash = raw.lastIndexOf('/');
             return slash >= 0 && slash < raw.length() - 1
                     ? raw.substring(slash + 1)
                     : raw;
+        }
+
+        private String shortClip(String value, int maxChars) {
+            if (value == null || value.length() <= maxChars) {
+                return value == null ? "" : value;
+            }
+            return value.substring(0, Math.max(maxChars - 1, 1)) + "…";
+        }
+    }
+
+    private static final class CandidateScore {
+        private final NodeText node;
+        private final int score;
+
+        private CandidateScore(NodeText node, int score) {
+            this.node = node;
+            this.score = score;
         }
     }
 }
